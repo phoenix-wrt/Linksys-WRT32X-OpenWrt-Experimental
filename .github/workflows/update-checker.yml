@@ -7,14 +7,13 @@ env:
 on:
   workflow_dispatch:
   schedule:
-    - cron: 0 */18 * * *
+    - cron: '0 4 * * *'  # Ежедневно в 4:00 утра по UTC
 
 jobs:
   check:
     runs-on: ubuntu-latest
 
     steps:
-
     - name: Get Commit Hash
       id: getHash
       run: |
