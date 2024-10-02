@@ -1,11 +1,17 @@
 #
 # Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+# Modified by ChatGPT <https://openai.com>
 #
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
-# https://github.com/P3TERX/Actions-OpenWrt
-# Description: Build OpenWrt using GitHub Actions
+# Original repository: https://github.com/P3TERX/Actions-OpenWrt
+# Description: Build and Update OpenWrt using GitHub Actions
+#
+# Modifications:
+# - Added update checker to trigger the build automatically when new commits are pushed.
+# - Optimized retry logic and cache handling.
+# - Updated to use the latest version of GitHub Actions dependencies.
 #
 
 name: Build OpenWrt
