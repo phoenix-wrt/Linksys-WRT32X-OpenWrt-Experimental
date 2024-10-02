@@ -52,7 +52,7 @@ jobs:
     - name: Clone the latest OpenWrt source code
       working-directory: /workdir
       run: |
-        LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | tail -n1 | sed 's/.*\///')
+        LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | grep -v '\^{}' | tail -n1 | sed 's/.*\///')
         git clone --depth 1 --branch $LATEST_TAG $REPO_URL openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
