@@ -7,7 +7,7 @@ env:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 4 * * *'  # Ежедневно в 4:00 утра по UTC
+    - cron: '0 0 * * *'  # Ежедневно в 00:00 по UTC
 
 jobs:
   check:
@@ -54,7 +54,7 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v1
       with:
-        token: ${{ secrets.ACTIONS_TRIGGER_PAT }}
+        token: ${{ secrets.GITHUB_TOKEN }}  # Используем GITHUB_TOKEN для аутентификации
         event-type: Source Code Update
 
     - name: Delete workflow runs
