@@ -12,3 +12,11 @@
 
 # Modify default IP
 #sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
+
+# Add cron job to run update_hosts.sh every Monday at 4 AM if it doesn't already exist
+CRON_JOB="0 4 * * 1 /usr/bin/update_hosts.sh"
+CRON_FILE="package/base-files/files/etc/crontabs/root"
+
+if ! grep -Fxq "$CRON_JOB" "$CRON_FILE"; then
+    echo "$CRON_JOB" >> "$CRON_FILE"
+fi
