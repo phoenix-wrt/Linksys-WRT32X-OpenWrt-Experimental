@@ -1,17 +1,17 @@
 #
 # Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
-# Modified by ChatGPT <https://openai.com>
 #
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
-# Original repository: https://github.com/P3TERX/Actions-OpenWrt
-# Description: Build and Update OpenWrt using GitHub Actions
+# https://github.com/P3TERX/Actions-OpenWrt
+# Description: Build OpenWrt using GitHub Actions (modified to include update_hosts.sh)
 #
 # Modifications:
-# - Added update checker to trigger the build automatically when new commits are pushed.
-# - Optimized retry logic and cache handling.
-# - Updated to use the latest version of GitHub Actions dependencies.
+# - Added wget check to ensure hosts file is successfully downloaded before replacing.
+# - Added cron job duplication check before appending.
+# - Added disk space check before compilation to ensure stability.
+# - Optimized dependency installation and cleanup process for performance.
 #
 
 name: Build OpenWrt
@@ -19,11 +19,6 @@ name: Build OpenWrt
 on:
   repository_dispatch:
   workflow_dispatch:
-    inputs:
-      ssh:
-        description: 'SSH connection to Actions'
-        required: false
-        default: 'false'
 
 env:
   REPO_URL: https://git.openwrt.org/openwrt/openwrt.git
@@ -49,8 +44,7 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo apt-get update -qq
-        sudo apt-get install -qq --no-install-recommends $(curl -fsSL git.io/depends-ubuntu-2004)
+        sudo apt-get update -qq && sudo apt-get install -qq --no-install-recommends $(curl -fsSL git.io/depends-ubuntu-2004)
         sudo apt-get clean
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir && sudo chown $USER:$GROUPS /workdir
@@ -58,7 +52,7 @@ jobs:
     - name: Clone the latest OpenWrt source code
       working-directory: /workdir
       run: |
-        LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | grep -v '\^{}' | tail -n1 | sed 's/.*\///')
+        LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | tail -n1 | sed 's/.*\///')
         git clone --depth 1 --branch $LATEST_TAG $REPO_URL openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
@@ -81,6 +75,63 @@ jobs:
         chmod +x $DIY_P2_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: Add custom update_hosts.sh script
+      run: |
+        cat << 'EOF' > openwrt/package/base-files/files/usr/bin/update_hosts.sh
+        #!/bin/sh
+
+        CHECK_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts"
+        HOSTS_FILE="/etc/hosts"
+        LAST_DATE_FILE="/etc/last_update_date"
+        TMP_FILE="/tmp/hosts_tmp"
+
+        if wget -qO $TMP_FILE $CHECK_URL; then
+            NEW_DATE=$(grep "^# Date:" $TMP_FILE | awk '{$1=""; print $0}')
+            if [ -f "$LAST_DATE_FILE" ]; then
+                LAST_DATE=$(cat $LAST_DATE_FILE)
+            else
+                LAST_DATE=""
+            fi
+
+            if [ "$NEW_DATE" != "$LAST_DATE" ]; then
+                mv $TMP_FILE $HOSTS_FILE
+                echo "$NEW_DATE" > $LAST_DATE_FILE
+                /etc/init.d/dnsmasq restart
+            fi
+        else
+            echo "Failed to download hosts file."
+            exit 1
+        fi
+
+        [ -f "$TMP_FILE" ] && rm $TMP_FILE
+        EOF
+
+        chmod +x openwrt/package/base-files/files/usr/bin/update_hosts.sh
+
+    - name: Check and add cron job for update_hosts.sh
+      run: |
+        CRON_JOB="0 4 * * 1 /usr/bin/update_hosts.sh"
+        CRON_FILE="openwrt/package/base-files/files/etc/crontabs/root"
+
+        if ! grep -qFx "$CRON_JOB" "$CRON_FILE"; then
+            echo "$CRON_JOB" >> "$CRON_FILE"
+        fi
+
+    - name: Check disk space before build
+      run: |
+        df -hT | grep "/dev/" | awk '{print $5}' | while read use; do
+            if [[ "${use//%}" -ge 90 ]]; then
+                echo "Insufficient disk space. Aborting."
+                exit 1
+            fi
+        done
+
+    - name: Update default feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
     - name: Download packages
       run: |
