@@ -117,13 +117,14 @@ jobs:
 
         chmod +x openwrt/package/base-files/files/usr/bin/update_hosts.sh
 
-    - name: Check and add cron job for update_hosts.sh
+        - name: Check and add cron job for update_hosts.sh
       run: |
         CRON_JOB="0 4 * * 1 /usr/bin/update_hosts.sh"
-        CRON_FILE="openwrt/package/base-files/files/etc/crontabs/root"
+        CRON_DIR="openwrt/package/base-files/files/etc/crontabs"
+        CRON_FILE="$CRON_DIR/root"
 
         # Ensure directory exists
-        mkdir -p $(dirname "$CRON_FILE")
+        mkdir -p "$CRON_DIR"
 
         # Check if the cron job already exists, if not, add it
         if [ ! -f "$CRON_FILE" ] || ! grep -qFx "$CRON_JOB" "$CRON_FILE"; then
