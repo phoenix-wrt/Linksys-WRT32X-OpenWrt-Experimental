@@ -7,58 +7,58 @@ env:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *'  # Ежедневно в 00:00 по UTC
+    - cron: "0 0 * * *" # Ежедневно в 00:00 по UTC
 
 jobs:
   check:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Get Commit Hash
-      id: getHash
-      run: |
-        retry() {
-          local n=1
-          local max=5
-          local delay=5
-          while true; do
-            "$@" && break || {
-              if [[ $n -lt $max ]]; then
-                ((n++))
-                echo "Retrying ($n/$max)..."
-                sleep $delay;
-              else
-                echo "The command failed after $n attempts." >&2
-                return 1
-              fi
-            }
-          done
-        }
+      - name: Get Commit Hash
+        id: getHash
+        run: |
+          retry() {
+            local n=1
+            local max=5
+            local delay=5
+            while true; do
+              "$@" && break || {
+                if [[ $n -lt $max ]]; then
+                  ((n++))
+                  echo "Retrying ($n/$max)..."
+                  sleep $delay;
+                else
+                  echo "The command failed after $n attempts." >&2
+                  return 1
+                fi
+              }
+            done
+          }
 
-        retry git clone --depth 1 --branch $REPO_BRANCH --single-branch --filter=blob:none $REPO_URL .
-        echo "::set-output name=commitHash::$(git rev-parse HEAD)"
+          retry git clone --depth 1 --branch $REPO_BRANCH --single-branch --filter=blob:none $REPO_URL .
+          echo "::set-output name=commitHash::$(git rev-parse HEAD)"
 
-    - name: Compare Commit Hash
-      id: cacheHash
-      uses: actions/cache@v3
-      with:
-        path: .commitHash
-        key: HEAD-${{ steps.getHash.outputs.commitHash }}
+      - name: Compare Commit Hash
+        id: cacheHash
+        uses: actions/cache@v3
+        with:
+          path: .commitHash
+          key: HEAD-${{ steps.getHash.outputs.commitHash }}
 
-    - name: Save New Commit Hash
-      if: steps.cacheHash.outputs.cache-hit != 'true'
-      run: |
-        echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
+      - name: Save New Commit Hash
+        if: steps.cacheHash.outputs.cache-hit != 'true'
+        run: |
+          echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
 
-    - name: Trigger build
-      if: steps.cacheHash.outputs.cache-hit != 'true'
-      uses: peter-evans/repository-dispatch@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}  # Используем GITHUB_TOKEN для аутентификации
-        event-type: Source Code Update
+      - name: Trigger build
+        if: steps.cacheHash.outputs.cache-hit != 'true'
+        uses: peter-evans/repository-dispatch@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }} # Используем GITHUB_TOKEN для аутентификации
+          event-type: Source Code Update
 
-    - name: Delete workflow runs
-      uses: GitRML/delete-workflow-runs@main
-      with:
-        retain_days: 1
-        keep_minimum_runs: 1
+      - name: Delete workflow runs
+        uses: GitRML/delete-workflow-runs@main
+        with:
+          retain_days: 1
+          keep_minimum_runs: 1
