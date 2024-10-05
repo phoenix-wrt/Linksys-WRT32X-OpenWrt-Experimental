@@ -1,8 +1,19 @@
 ---
 # Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+#
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
+#
 # https://github.com/P3TERX/Actions-OpenWrt
+# Description: Build OpenWrt using GitHub Actions (modified to include update_hosts.sh)
+#
+# Modifications:
+# - Added wget check to ensure hosts file is successfully downloaded before replacing.
+# - Added disk space check before compilation to ensure stability.
+# - Optimized dependency installation and cleanup process for performance.
+# - Fixed issue with cloning repository when no tags are found.
+# - Ensured directory exists before adding cron job to prevent errors.
+#
 
 name: Build OpenWrt
 
@@ -11,15 +22,14 @@ on:
   workflow_dispatch:
 
 env:
-  REPO_URL: >
-    https://git.openwrt.org/openwrt/openwrt.git
+  REPO_URL: https://git.openwrt.org/openwrt/openwrt.git
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: false
+  UPLOAD_BIN_DIR: "false"
+  UPLOAD_FIRMWARE: "true"
+  UPLOAD_RELEASE: "false"
   TZ: Europe/Kiev
 
 jobs:
@@ -108,3 +118,84 @@ jobs:
         EOF
 
         chmod +x openwrt/package/base-files/files/usr/bin/update_hosts.sh
+
+    - name: Check disk space before build
+      run: |
+        AVAILABLE_SPACE=$(df -hT . | awk 'NR==2 {print $5}' | sed 's/%//')
+        if [ "$AVAILABLE_SPACE" -ge 90 ]; then
+            echo "Insufficient disk space. Aborting."
+            exit 1
+        fi
+
+    - name: Update default feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Download packages
+      run: |
+        cd openwrt
+        make defconfig
+        make download -j$(nproc)
+        find dl -size -1024c -exec rm -f {} +
+
+    - name: Compile firmware
+      run: |
+        cd openwrt
+        make -j$(nproc) || make -j1 V=s
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    - name: Check disk space usage
+      run: df -hT
+
+    - name: Upload binary directory (optional)
+      uses: actions/upload-artifact@v3
+      if: success() && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: openwrt/bin
+
+    - name: Organize firmware files
+      run: |
+        cd openwrt/bin/targets/*/*
+        rm -rf packages
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+
+    - name: Upload firmware
+      uses: actions/upload-artifact@v3
+      if: env.UPLOAD_FIRMWARE == 'true'
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+
+    - name: Create release tag (optional)
+      if: env.UPLOAD_RELEASE == 'true'
+      run: |
+        echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
+
+    - name: Upload firmware to GitHub Release (optional)
+      uses: softprops/action-gh-release@v1
+      if: success() && env.UPLOAD_RELEASE == 'true'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        files: ${{ env.FIRMWARE }}/*
+
+    - name: Cleanup old workflow runs
+      uses: GitRML/delete-workflow-runs@main
+      with:
+        retain_days: 1
+        keep_minimum_runs: 3
+
+    - name: Remove old releases (optional)
+      uses: dev-drprasad/delete-older-releases@v0.1.0
+      if: env.UPLOAD_RELEASE == 'true'
+      with:
+        keep_latest: 3
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
