@@ -12,6 +12,7 @@
 # - Added cron job duplication check before appending.
 # - Added disk space check before compilation to ensure stability.
 # - Optimized dependency installation and cleanup process for performance.
+# - Fixed issue with cloning repository when no tags are found.
 #
 
 name: Build OpenWrt
@@ -52,8 +53,14 @@ jobs:
     - name: Clone the latest OpenWrt source code
       working-directory: /workdir
       run: |
-        LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | tail -n1 | sed 's/.*\///')
-        git clone --depth 1 --branch $LATEST_TAG $REPO_URL openwrt
+        LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | grep -v '\^{}' | tail -n1 | sed 's/.*\///')
+        if [ -z "$LATEST_TAG" ]; then
+          echo "No tags found, using default branch 'master'."
+          git clone --depth 1 $REPO_URL openwrt
+        else
+          echo "Cloning latest tag: $LATEST_TAG"
+          git clone --depth 1 --branch $LATEST_TAG $REPO_URL openwrt
+        fi
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: Load custom feeds
