@@ -7,7 +7,7 @@ env:
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *" # Ежедневно в 00:00 по UTC
+    - cron: "0 0 * * *" # Каждый день в 00:00 по UTC
 
 jobs:
   check:
@@ -37,6 +37,7 @@ jobs:
 
           retry git clone --depth 1 --branch $REPO_BRANCH --single-branch --filter=blob:none $REPO_URL .
           echo "::set-output name=commitHash::$(git rev-parse HEAD)"
+          echo "::set-output name=commitDate::$(git show -s --format=%ci HEAD)"
 
       - name: Compare Commit Hash
         id: cacheHash
@@ -49,9 +50,18 @@ jobs:
         if: steps.cacheHash.outputs.cache-hit != 'true'
         run: |
           echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
+          echo ${{ steps.getHash.outputs.commitDate }} | tee .commitDate
+
+      - name: Check for changes
+        id: checkChanges
+        run: |
+          if [[ "${{ steps.cacheHash.outputs.cache-hit }}" == 'true' ]]; then
+            echo "No changes detected. Exiting."
+            exit 0
+          fi
 
       - name: Trigger build
-        if: steps.cacheHash.outputs.cache-hit != 'true'
+        if: steps.checkChanges.outcome == 'success'
         uses: peter-evans/repository-dispatch@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }} # Используем GITHUB_TOKEN для аутентификации
