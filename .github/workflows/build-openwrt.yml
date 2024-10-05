@@ -13,6 +13,7 @@
 # - Added disk space check before compilation to ensure stability.
 # - Optimized dependency installation and cleanup process for performance.
 # - Fixed issue with cloning repository when no tags are found.
+# - Ensured directory exists before adding cron job to prevent errors.
 #
 
 name: Build OpenWrt
@@ -121,18 +122,21 @@ jobs:
         CRON_JOB="0 4 * * 1 /usr/bin/update_hosts.sh"
         CRON_FILE="openwrt/package/base-files/files/etc/crontabs/root"
 
-        if ! grep -qFx "$CRON_JOB" "$CRON_FILE"; then
+        # Ensure directory exists
+        mkdir -p $(dirname "$CRON_FILE")
+
+        # Check if the cron job already exists, if not, add it
+        if [ ! -f "$CRON_FILE" ] || ! grep -qFx "$CRON_JOB" "$CRON_FILE"; then
             echo "$CRON_JOB" >> "$CRON_FILE"
         fi
 
     - name: Check disk space before build
       run: |
-        df -hT | grep "/dev/" | awk '{print $5}' | while read use; do
-            if [[ "${use//%}" -ge 90 ]]; then
-                echo "Insufficient disk space. Aborting."
-                exit 1
-            fi
-        done
+        AVAILABLE_SPACE=$(df -hT . | awk 'NR==2 {print $5}' | sed 's/%//')
+        if [ "$AVAILABLE_SPACE" -ge 90 ]; then
+            echo "Insufficient disk space. Aborting."
+            exit 1
+        fi
 
     - name: Update default feeds
       run: |
@@ -160,7 +164,7 @@ jobs:
 
     - name: Upload binary directory (optional)
       uses: actions/upload-artifact@v3
-      if: steps.compile.outcome == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      if: success() && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: openwrt/bin
@@ -185,7 +189,7 @@ jobs:
 
     - name: Upload firmware to GitHub Release (optional)
       uses: softprops/action-gh-release@v1
-      if: steps.compile.outcome == 'success' && env.UPLOAD_RELEASE == 'true'
+      if: success() && env.UPLOAD_RELEASE == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
