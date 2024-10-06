@@ -20,18 +20,18 @@ on:
   workflow_dispatch:
 
 env:
-  REPO_URL: https://github.com/coolsnowwolf/lede
-  REPO_BRANCH: master
+  REPO_URL: https://github.com/openwrt/openwrt
+  REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
-  UPLOAD_COWTRANSFER: false
-  UPLOAD_WETRANSFER: false
-  UPLOAD_RELEASE: false
+  UPLOAD_RELEASE: true
   TZ: Europe/Kiev
+  BUILD_THREADS: 2
+  HOSTS_URL: https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts
 
 jobs:
   build:
@@ -51,6 +51,7 @@ jobs:
 
       - name: Clean up disk space
         run: |
+          sudo apt-get remove --purge -y man-db
           sudo apt-get clean
           sudo rm -rf /usr/local/share/locale
           sudo rm -rf /var/lib/apt/lists/*
@@ -89,7 +90,7 @@ jobs:
           mkdir -p openwrt/files/usr/bin
           cat << 'EOF' > openwrt/files/usr/bin/update_hosts.sh
           #!/bin/sh
-          CHECK_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts"
+          CHECK_URL="${HOSTS_URL}"
           HOSTS_FILE="/etc/hosts"
           LAST_DATE_FILE="/etc/last_update_date"
           TMP_FILE="/tmp/hosts_tmp"
@@ -110,6 +111,16 @@ jobs:
           EOF
           chmod +x openwrt/files/usr/bin/update_hosts.sh
 
+      - name: Cache OpenWrt build dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            openwrt/dl
+            openwrt/staging_dir
+          key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-
+
       - name: Download package
         id: package
         run: |
@@ -123,8 +134,8 @@ jobs:
         id: compile
         run: |
           cd openwrt
-          echo -e "2 thread compile"
-          make -j2 || make -j1 V=s
+          echo -e "${BUILD_THREADS} thread compile"
+          make -j${BUILD_THREADS} || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
           [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
@@ -157,32 +168,11 @@ jobs:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
 
-      - name: Upload firmware to cowtransfer
-        id: cowtransfer
-        if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
-        run: |
-          curl -fsSL git.io/file-transfer | sh
-          ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
-          echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
-          echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
-
-      - name: Upload firmware to WeTransfer
-        id: wetransfer
-        if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
-        run: |
-          curl -fsSL git.io/file-transfer | sh
-          ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
-          echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-          echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
-
       - name: Generate release tag
         id: tag
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-          touch release.txt
-          [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
-          [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release
@@ -192,8 +182,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
-          body_path: release.txt
+          name: Release ${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           files: ${{ env.FIRMWARE }}/*
+          body: "Automated release for device ${{ env.DEVICE_NAME }} on ${{ env.FILE_DATE }}"
 
       - name: Delete workflow runs
         uses: GitRML/delete-workflow-runs@main
