@@ -63,6 +63,12 @@ jobs:
           sudo apt-get clean
           sudo timedatectl set-timezone "$TZ"
           mkdir -p workdir && sudo chown $USER:$GROUPS workdir
+          # Добавляем кэширование
+          echo "Setting up ccache..."
+          sudo apt-get install -qq ccache
+          export PATH="/usr/lib/ccache:$PATH"
+          ccache --max-size=2G
+          ccache -z
 
       - name: Clone the latest OpenWrt source code
         working-directory: ./workdir
@@ -97,7 +103,7 @@ jobs:
               sleep 10
             fi
           done
-          
+
           if [ $i -eq 3 ]; then
             echo "Failed to update feeds after 3 attempts. Printing debug information..."
             git --version
@@ -107,7 +113,7 @@ jobs:
             curl -v https://git.openwrt.org
             exit 1
           fi
-          
+
           ./scripts/feeds install -a
 
       - name: Load custom configuration
@@ -130,13 +136,13 @@ jobs:
 
           if wget -qO $TMP_FILE $CHECK_URL; then
               NEW_DATE=$(grep "^# Date:" $TMP_FILE | awk '{$1=""; print $0}')
-              if [ -f "$LAST_DATE_FILE" ]; then
+              if [ -f "$LAST_DATE_FILE" ] then
                   LAST_DATE=$(cat $LAST_DATE_FILE)
               else
                   LAST_DATE=""
               fi
 
-              if [ "$NEW_DATE" != "$LAST_DATE" ]; then
+              if [ "$NEW_DATE" != "$LAST_DATE" ] then
                   mv $TMP_FILE $HOSTS_FILE
                   echo "$NEW_DATE" > $LAST_DATE_FILE
                   /etc/init.d/dnsmasq restart
@@ -162,7 +168,7 @@ jobs:
               sleep 10
             fi
           done
-          
+
           if [ $i -eq 3 ]; then
             echo "Failed to check and update feeds after 3 attempts. Exiting."
             exit 1
@@ -178,10 +184,13 @@ jobs:
       - name: Compile firmware
         run: |
           cd openwrt
+          echo "Using $(nproc) cores for compilation"
           make -j$(nproc) || { 
             echo "Initial build failed, retrying with verbose output..."
             make -j1 V=s
           }
+          echo "ccache statistics:"
+          ccache -s
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | \
             sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
           [ -s DEVICE_NAME ] && \
@@ -205,16 +214,19 @@ jobs:
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
       - name: Upload firmware
-        uses: actions/upload-artifact@v3
-        if: env.UPLOAD_FIRMWARE == 'true'
+        if: steps.organize.outputs.status == 'success' && !cancelled()
+        uses: actions/upload-artifact@v2
         with:
-          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          name: OpenWrt_firmware
           path: ${{ env.FIRMWARE }}
 
       - name: Create release tag (optional)
         if: env.UPLOAD_RELEASE == 'true'
         run: |
-          echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
+          echo "::set-output name=status::success"
+          echo "DATE=$(date "+%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
+          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> \
+            $GITHUB_OUTPUT
 
       - name: Upload firmware to GitHub Release (optional)
         uses: softprops/action-gh-release@v1
@@ -239,3 +251,24 @@ jobs:
           delete_tags: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache OpenWrt build
+        uses: actions/cache@v3
+        with:
+          path: |
+            openwrt/build_dir
+            openwrt/staging_dir
+            openwrt/dl
+          key: ${{ runner.os }}-openwrt-${{ hashFiles('**/feeds.conf.default') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-
+
+      - name: Cache dependencies
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.openwrt/dl
+          key: ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-dependencies-
