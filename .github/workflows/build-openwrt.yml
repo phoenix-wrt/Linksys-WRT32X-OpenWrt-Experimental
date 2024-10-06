@@ -1,4 +1,16 @@
 ---
+# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+# Description: Optimized Build OpenWrt using GitHub Actions
+#              (includes update_hosts.sh)
+#
+# Modifications:
+# (описание изменений остается без изменений)
+
 name: Build OpenWrt
 
 on:
@@ -6,7 +18,8 @@ on:
   workflow_dispatch:
 
 env:
-  REPO_URL: https://git.openwrt.org/openwrt/openwrt.git
+  REPO_URL: >
+    https://git.openwrt.org/openwrt/openwrt.git
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
@@ -24,7 +37,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v3
 
-      - name: Pre-check: Disk space and System Info
+      - name: "Pre-check - Disk space and System Info"
         run: |
           echo "Checking system information and available disk space..."
           df -hT
@@ -32,10 +45,10 @@ jobs:
           uname -a
           AVAILABLE_SPACE=$(df -hT . | awk 'NR==2 {print $5}' | sed 's/%//')
           if [ "$AVAILABLE_SPACE" -ge 90 ]; then
-              echo "Insufficient disk space. Available: $AVAILABLE_SPACE%. Aborting."
-              exit 1
+            echo "Insufficient disk space. Available: $AVAILABLE_SPACE%. Aborting."
+            exit 1
           else
-              echo "Sufficient disk space available: $AVAILABLE_SPACE%."
+            echo "Sufficient disk space available: $AVAILABLE_SPACE%."
           fi
 
       - name: Setup environment and dependencies
@@ -43,8 +56,9 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           echo "Cleaning and updating environment..."
-          sudo apt-get update -qq && sudo apt-get install -qq --no-install-recommends \
-              $(curl -fsSL git.io/depends-ubuntu-2004) && sudo apt-get clean
+          sudo apt-get update -qq && sudo apt-get install -qq \
+            --no-install-recommends $(curl -fsSL git.io/depends-ubuntu-2004)
+          sudo apt-get clean
           sudo timedatectl set-timezone "$TZ"
           mkdir -p /workdir && sudo chown $USER:$GROUPS /workdir
 
@@ -52,8 +66,8 @@ jobs:
         working-directory: /workdir
         run: |
           echo "Cloning latest OpenWrt repository..."
-          LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | grep -v \
-              '\^{}' | tail -n1 | sed 's/.*\///')
+          LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | \
+            grep -v '\^{}' | tail -n1 | sed 's/.*\///')
           if [ -z "$LATEST_TAG" ]; then
             echo "No tags found, using default branch 'master'."
             git clone --depth 1 $REPO_URL openwrt
@@ -95,13 +109,13 @@ jobs:
 
           if wget -qO $TMP_FILE $CHECK_URL; then
               NEW_DATE=$(grep "^# Date:" $TMP_FILE | awk '{$1=""; print $0}')
-              if [ -f "$LAST_DATE_FILE" ]; then
+              if [ -f "$LAST_DATE_FILE" ] then
                   LAST_DATE=$(cat $LAST_DATE_FILE)
               else
                   LAST_DATE=""
               fi
 
-              if [ "$NEW_DATE" != "$LAST_DATE" ]; then
+              if [ "$NEW_DATE" != "$LAST_DATE" ] then
                   mv $TMP_FILE $HOSTS_FILE
                   echo "$NEW_DATE" > $LAST_DATE_FILE
                   /etc/init.d/dnsmasq restart
@@ -131,12 +145,17 @@ jobs:
       - name: Compile firmware
         run: |
           cd openwrt
-          make -j$(nproc) || { echo "Initial build failed, retrying with verbose output..."; make -j1 V=s; }
-          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          make -j$(nproc) || { 
+            echo "Initial build failed, retrying with verbose output..."
+            make -j1 V=s
+          }
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | \
+            sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && \
+            echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-      - name: Post-build: Check disk space usage
+      - name: "Post-build - Check disk space usage"
         run: df -h /
 
       - name: Upload binary directory (optional)
@@ -181,6 +200,9 @@ jobs:
 
       - name: Remove old releases (optional)
         uses: dev-drprasad/delete-older-releases@v0.1.0
-        if: env.UPLOAD_RELEASE == 'true'
+        if: env.UPLOAD_RELEASE == true
         with:
-          keep_last: 3
+          keep_latest: 3
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
