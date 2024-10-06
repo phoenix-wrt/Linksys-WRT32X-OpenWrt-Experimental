@@ -5,22 +5,19 @@
 # See /LICENSE for more information.
 #
 # https://github.com/P3TERX/Actions-OpenWrt
-# Description: Optimized Build OpenWrt using GitHub Actions
-#              (includes update_hosts.sh)
+# Description: Build OpenWrt using GitHub Actions
 #
-# Modifications:
-# (описание изменений остается без изменений)
+
+# This workflow automates the process of building custom OpenWrt firmware.
+# It clones the OpenWrt source, updates and installs feeds, applies custom
+# configurations, compiles the firmware, and optionally uploads the resulting
+# binaries and packages to various file sharing services or as a GitHub release.
 
 name: Build OpenWrt
 
 on:
   repository_dispatch:
   workflow_dispatch:
-    inputs:
-      ssh:
-        description: "SSH connection to Actions"
-        required: false
-        default: false
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
@@ -34,7 +31,7 @@ env:
   UPLOAD_COWTRANSFER: false
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: false
-  TZ: Asia/Shanghai
+  TZ: Europe/Kiev
 
 jobs:
   build:
@@ -79,12 +76,31 @@ jobs:
           cd openwrt
           $GITHUB_WORKSPACE/$DIY_P2_SH
 
-      - name: SSH connection to Actions
-        uses: P3TERX/ssh2actions@v1.0.0
-        if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
-        env:
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      - name: Create update_hosts.sh
+        run: |
+          mkdir -p openwrt/files/usr/bin
+          cat << 'EOF' > openwrt/files/usr/bin/update_hosts.sh
+          #!/bin/sh
+          CHECK_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts"
+          HOSTS_FILE="/etc/hosts"
+          LAST_DATE_FILE="/etc/last_update_date"
+          TMP_FILE="/tmp/hosts_tmp"
+          wget -qO "$TMP_FILE" "$CHECK_URL"
+          NEW_DATE=$(grep "^# Date:" "$TMP_FILE" | sed 's/^# Date: //')
+          if [ -f "$LAST_DATE_FILE" ]; then
+              LAST_DATE=$(cat "$LAST_DATE_FILE")
+          else
+              LAST_DATE=""
+          fi
+          if [ "$NEW_DATE" != "$LAST_DATE" ]; then
+              mv "$TMP_FILE" "$HOSTS_FILE"
+              echo "$NEW_DATE" > "$LAST_DATE_FILE"
+              /etc/init.d/dnsmasq restart
+          else
+              rm -f "$TMP_FILE"
+          fi
+          EOF
+          chmod +x openwrt/files/usr/bin/update_hosts.sh
 
       - name: Download package
         id: package
