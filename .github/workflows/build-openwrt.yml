@@ -57,13 +57,15 @@ jobs:
         run: |
           echo "Cleaning and updating environment..."
           sudo apt-get update -qq && sudo apt-get install -qq \
-            --no-install-recommends $(curl -fsSL git.io/depends-ubuntu-2004)
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip \
+            zlib1g-dev file wget
           sudo apt-get clean
           sudo timedatectl set-timezone "$TZ"
-          mkdir -p /workdir && sudo chown $USER:$GROUPS /workdir
+          mkdir -p $HOME/workdir && sudo chown $USER:$GROUPS $HOME/workdir
 
       - name: Clone the latest OpenWrt source code
-        working-directory: /workdir
+        working-directory: $HOME/workdir
         run: |
           echo "Cloning latest OpenWrt repository..."
           LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | \
@@ -75,7 +77,7 @@ jobs:
             echo "Cloning latest tag: $LATEST_TAG"
             git clone --depth 1 --branch $LATEST_TAG $REPO_URL openwrt
           fi
-          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+          ln -sf $HOME/workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
       - name: Load custom feeds and scripts
         run: |
