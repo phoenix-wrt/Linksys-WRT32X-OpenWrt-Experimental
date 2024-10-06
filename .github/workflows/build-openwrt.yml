@@ -1,28 +1,4 @@
 ---
-# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# Description: Optimized Build OpenWrt using GitHub Actions (includes update_hosts.sh)
-#
-# Modifications:
-# - Added a pre-check for disk space before starting the build to ensure sufficient space.
-# - Merged sudo operations and cleanup steps to minimize overhead.
-# - Set a retry mechanism for package downloads to handle intermittent network issues.
-# - Implemented multi-threading for faster package download and build processes.
-# - Added additional logging for better visibility into disk space usage and system info.
-# - Improved error handling by providing retry mechanisms for critical steps (e.g., package download, compilation).
-# - Consolidated directory and permission setup steps for efficiency.
-# - Added logic to dynamically fetch and set the latest OpenWrt tag when available, using the master branch as a fallback.
-# - Refined conditional logic for the optional steps such as firmware upload and release creation to minimize unnecessary runs.
-# - Ensured that small-sized (under 1KB) incomplete downloads are removed during the download stage.
-# - Updated the hosts file update script (`update_hosts.sh`) to ensure better error handling and proper clean-up after execution.
-# - Reduced unnecessary re-execution of certain steps by optimizing dependencies.
-# - Added conditional checks for disk space usage throughout the process to prevent build failures due to insufficient space.
-# - Improved the cleanup process for older GitHub Actions workflow runs and releases for better repository management.
-#
 name: Build OpenWrt
 
 on:
