@@ -14,57 +14,44 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get Commit Hash
-        id: getHash
+      - name: Get Latest Commit Info
+        id: getCommitInfo
         run: |
-          retry() {
-            local n=1
-            local max=5
-            local delay=5
-            while true; do
-              "$@" && break || {
-                if [[ $n -lt $max ]]; then
-                  ((n++))
-                  echo "Retrying ($n/$max)..."
-                  sleep $delay;
-                else
-                  echo "The command failed after $n attempts." >&2
-                  return 1
-                fi
-              }
-            done
-          }
+          COMMIT_INFO=$(curl -s "https://api.github.com/repos/openwrt/openwrt/branches/$REPO_BRANCH")
+          COMMIT_HASH=$(echo $COMMIT_INFO | jq -r .commit.sha)
+          COMMIT_DATE=$(echo $COMMIT_INFO | jq -r .commit.commit.committer.date)
+          echo "::set-output name=commitHash::$COMMIT_HASH"
+          echo "::set-output name=commitDate::$COMMIT_DATE"
 
-          retry git clone --depth 1 --branch $REPO_BRANCH --single-branch --filter=blob:none $REPO_URL .
-          echo "::set-output name=commitHash::$(git rev-parse HEAD)"
-          echo "::set-output name=commitDate::$(git show -s --format=%ci HEAD)"
-
-      - name: Compare Commit Hash
-        id: cacheHash
-        uses: actions/cache@v3
-        with:
-          path: .commitHash
-          key: HEAD-${{ steps.getHash.outputs.commitHash }}
-
-      - name: Save New Commit Hash
-        if: steps.cacheHash.outputs.cache-hit != 'true'
+      - name: Compare Commit Info
+        id: compareCommit
         run: |
-          echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
-          echo ${{ steps.getHash.outputs.commitDate }} | tee .commitDate
-
-      - name: Check for changes
-        id: checkChanges
-        run: |
-          if [[ "${{ steps.cacheHash.outputs.cache-hit }}" == 'true' ]]; then
-            echo "No changes detected. Exiting."
-            exit 0
+          if [ -f .lastCommitInfo ]; then
+            LAST_HASH=$(cat .lastCommitInfo | head -n 1)
+            LAST_DATE=$(cat .lastCommitInfo | tail -n 1)
+            if [ "$LAST_HASH" != "${{ steps.getCommitInfo.outputs.commitHash }}" ] && [ "$LAST_DATE" != "${{ steps.getCommitInfo.outputs.commitDate }}" ]; then
+              echo "Changes detected"
+              echo "::set-output name=changed::true"
+            else
+              echo "No changes detected"
+              echo "::set-output name=changed::false"
+            fi
+          else
+            echo "First run, changes assumed"
+            echo "::set-output name=changed::true"
           fi
 
+      - name: Save New Commit Info
+        if: steps.compareCommit.outputs.changed == 'true'
+        run: |
+          echo "${{ steps.getCommitInfo.outputs.commitHash }}" > .lastCommitInfo
+          echo "${{ steps.getCommitInfo.outputs.commitDate }}" >> .lastCommitInfo
+
       - name: Trigger build
-        if: steps.checkChanges.outcome == 'success'
+        if: steps.compareCommit.outputs.changed == 'true'
         uses: peter-evans/repository-dispatch@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }} # Используем GITHUB_TOKEN для аутентификации
+          token: ${{ secrets.GITHUB_TOKEN }}
           event-type: Source Code Update
 
       - name: Delete workflow runs
