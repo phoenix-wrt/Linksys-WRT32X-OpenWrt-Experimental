@@ -23,7 +23,6 @@
 # - Added conditional checks for disk space usage throughout the process to prevent build failures due to insufficient space.
 # - Improved the cleanup process for older GitHub Actions workflow runs and releases for better repository management.
 #
-
 name: Build OpenWrt
 
 on:
