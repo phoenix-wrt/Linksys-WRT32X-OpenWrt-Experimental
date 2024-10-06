@@ -23,6 +23,7 @@
 # - Added conditional checks for disk space usage throughout the process to prevent build failures due to insufficient space.
 # - Improved the cleanup process for older GitHub Actions workflow runs and releases for better repository management.
 #
+
 name: Build OpenWrt
 
 on:
@@ -48,8 +49,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v3
 
-      - name:
-          Pre-check: Disk space and System Info
+      - name: Pre-check: Disk space and System Info
         run: |
           echo "Checking system information and available disk space..."
           df -hT
@@ -161,8 +161,7 @@ jobs:
           [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-      - name:
-          Post-build: Check disk space usage
+      - name: Post-build: Check disk space usage
         run: df -h /
 
       - name: Upload binary directory (optional)
@@ -209,7 +208,4 @@ jobs:
         uses: dev-drprasad/delete-older-releases@v0.1.0
         if: env.UPLOAD_RELEASE == 'true'
         with:
-          keep_latest: 3
-          delete_tags: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          keep_last: 3
