@@ -12,9 +12,3 @@
 
 # Modify default IP
 #sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
-
-# Создаем директорию для crontab, если она не существует
-mkdir -p package/base-files/files/etc/crontabs
-
-# Создаем или обновляем файл crontab
-echo '0 4 * * 1 [ $(date +\%d) -le 7 ] && reboot' > package/base-files/files/etc/crontabs/root
