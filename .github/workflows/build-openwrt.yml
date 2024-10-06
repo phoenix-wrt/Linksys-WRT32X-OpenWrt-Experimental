@@ -7,7 +7,6 @@
 # https://github.com/P3TERX/Actions-OpenWrt
 # Description: Build OpenWrt using GitHub Actions
 #
-
 # This workflow automates the process of building custom OpenWrt firmware.
 # It clones the OpenWrt source, updates and installs feeds, applies custom
 # configurations, compiles the firmware, and optionally uploads the resulting
