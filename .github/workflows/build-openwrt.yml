@@ -4,13 +4,20 @@
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
-# https://github.com/P3TERX/Actions-OpenWrt
-# Description: Build OpenWrt using GitHub Actions
+# Description: This GitHub Actions workflow automates the process of building 
+# custom OpenWrt firmware. It clones the OpenWrt source code, updates and 
+# installs package feeds, applies custom configurations, compiles the firmware, 
+# and uploads the resulting binaries to GitHub releases or other file sharing 
+# services.
 #
-# This workflow automates the process of building custom OpenWrt firmware.
-# It clones the OpenWrt source, updates and installs feeds, applies custom
-# configurations, compiles the firmware, and optionally uploads the resulting
-# binaries and packages to various file sharing services or as a GitHub release.
+# Key features:
+# - Customizable OpenWrt source and branch
+# - Support for custom feeds and configurations
+# - Automatic package downloads and compilation
+# - Caching of build dependencies for faster subsequent builds
+# - Automatic firmware upload to GitHub releases
+# - Automatic cleanup of old workflow runs and releases
+# - Custom script for updating hosts file
 
 name: Build OpenWrt
 
@@ -31,10 +38,11 @@ env:
   TZ: Europe/Kiev
   BUILD_THREADS: 2
   HOSTS_URL: https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts
+  CACHE_KEY: openwrt-${{ hashFiles('openwrt/.config') }}
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -116,9 +124,9 @@ jobs:
           path: |
             openwrt/dl
             openwrt/staging_dir
-          key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config') }}
+          key: ${{ runner.os }}-${{ env.CACHE_KEY }}
           restore-keys: |
-            ${{ runner.os }}-openwrt-
+            ${{ runner.os }}-${{ env.CACHE_KEY }}
 
       - name: Download package
         id: package
@@ -183,7 +191,13 @@ jobs:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           name: Release ${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           files: ${{ env.FIRMWARE }}/*
-          body: "Automated release for device ${{ env.DEVICE_NAME }} on ${{ env.FILE_DATE }}"
+          body: |
+            Automated release for device ${{ env.DEVICE_NAME }} on ${{ env.FILE_DATE }}
+            
+            Changes in this release:
+            - Updated OpenWrt to latest version
+            - Included latest security patches
+            - [Add any other relevant changes here]
 
       - name: Delete workflow runs
         uses: GitRML/delete-workflow-runs@main
