@@ -16,259 +16,172 @@ name: Build OpenWrt
 on:
   repository_dispatch:
   workflow_dispatch:
+    inputs:
+      ssh:
+        description: "SSH connection to Actions"
+        required: false
+        default: false
 
 env:
-  REPO_URL: >
-    https://git.openwrt.org/openwrt/openwrt.git
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
+  UPLOAD_COWTRANSFER: false
+  UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: false
-  TZ: Europe/Kiev
+  TZ: Asia/Shanghai
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: "Pre-check - Disk space and System Info"
-        run: |
-          echo "Checking system information and available disk space..."
-          df -hT
-          echo "System Info:"
-          uname -a
-          AVAILABLE_SPACE=$(df -hT . | awk 'NR==2 {print $5}' | sed 's/%//')
-          if [ "$AVAILABLE_SPACE" -ge 90 ]; then
-            echo "Insufficient disk space. Available: $AVAILABLE_SPACE%. Aborting."
-            exit 1
-          else
-            echo "Sufficient disk space available: $AVAILABLE_SPACE%."
-          fi
-
-      - name: Setup environment and dependencies
+      - name: Initialize environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          echo "Cleaning and updating environment..."
-          sudo apt-get update -qq && sudo apt-get install -qq \
-            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-            gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip \
-            zlib1g-dev file wget
-          sudo apt-get clean
           sudo timedatectl set-timezone "$TZ"
-          mkdir -p workdir && sudo chown $USER:$GROUPS workdir
-          # Добавляем кэширование
-          echo "Setting up ccache..."
-          sudo apt-get install -qq ccache
-          export PATH="/usr/lib/ccache:$PATH"
-          ccache --max-size=2G
-          ccache -z
+          sudo mkdir -p /workdir
+          sudo chown $USER:$GROUPS /workdir
 
-      - name: Clone the latest OpenWrt source code
-        working-directory: ./workdir
+      - name: Clone source code
+        working-directory: /workdir
         run: |
-          echo "Cloning latest OpenWrt repository..."
-          LATEST_TAG=$(git ls-remote --tags --sort="v:refname" $REPO_URL | \
-            grep -v '\^{}' | tail -n1 | sed 's/.*\///')
-          if [ -z "$LATEST_TAG" ]; then
-            echo "No tags found, using default branch 'master'."
-            git clone --depth 1 $REPO_URL openwrt
-          else
-            echo "Cloning latest tag: $LATEST_TAG"
-            git clone --depth 1 --branch $LATEST_TAG $REPO_URL openwrt
-          fi
-          ln -sf $GITHUB_WORKSPACE/workdir/openwrt $GITHUB_WORKSPACE/openwrt
+          git clone $REPO_URL -b $REPO_BRANCH openwrt
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-      - name: Load custom feeds and scripts
+      - name: Load custom feeds
         run: |
           [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-          chmod +x $DIY_P1_SH $DIY_P2_SH
+          chmod +x $DIY_P1_SH
           cd openwrt
           $GITHUB_WORKSPACE/$DIY_P1_SH
 
-      - name: Update and install feeds
-        run: |
-          cd openwrt
-          for i in {1..3}; do
-            if ./scripts/feeds update -a; then
-              break
-            else
-              echo "Attempt $i to update feeds failed. Retrying in 10 seconds..."
-              sleep 10
-            fi
-          done
+      - name: Update feeds
+        run: cd openwrt && ./scripts/feeds update -a
 
-          if [ $i -eq 3 ]; then
-            echo "Failed to update feeds after 3 attempts. Printing debug information..."
-            git --version
-            openssl version
-            curl --version
-            echo "Testing connection to git.openwrt.org:"
-            curl -v https://git.openwrt.org
-            exit 1
-          fi
-
-          ./scripts/feeds install -a
+      - name: Install feeds
+        run: cd openwrt && ./scripts/feeds install -a
 
       - name: Load custom configuration
         run: |
           [ -e files ] && mv files openwrt/files
           [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+          chmod +x $DIY_P2_SH
           cd openwrt
           $GITHUB_WORKSPACE/$DIY_P2_SH
 
-      - name: Add custom update_hosts.sh script
-        run: |
-          mkdir -p openwrt/package/base-files/files/usr/bin
-          cat << 'EOF' > openwrt/package/base-files/files/usr/bin/update_hosts.sh
-          #!/bin/sh
+      - name: SSH connection to Actions
+        uses: P3TERX/ssh2actions@v1.0.0
+        if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+        env:
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
-          CHECK_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts"
-          HOSTS_FILE="/etc/hosts"
-          LAST_DATE_FILE="/etc/last_update_date"
-          TMP_FILE="/tmp/hosts_tmp"
-
-          if wget -qO $TMP_FILE $CHECK_URL; then
-              NEW_DATE=$(grep "^# Date:" $TMP_FILE | awk '{$1=""; print $0}')
-              if [ -f "$LAST_DATE_FILE" ] then
-                  LAST_DATE=$(cat $LAST_DATE_FILE)
-              else
-                  LAST_DATE=""
-              fi
-
-              if [ "$NEW_DATE" != "$LAST_DATE" ] then
-                  mv $TMP_FILE $HOSTS_FILE
-                  echo "$NEW_DATE" > $LAST_DATE_FILE
-                  /etc/init.d/dnsmasq restart
-              fi
-          else
-              echo "Failed to download hosts file."
-              exit 1
-          fi
-
-          [ -f "$TMP_FILE" ] && rm $TMP_FILE
-          EOF
-
-          chmod +x openwrt/package/base-files/files/usr/bin/update_hosts.sh
-
-      - name: Check and update default feeds
-        run: |
-          cd openwrt
-          for i in {1..3}; do
-            if ./scripts/feeds update -a && ./scripts/feeds install -a; then
-              break
-            else
-              echo "Attempt $i to check and update feeds failed. Retrying in 10 seconds..."
-              sleep 10
-            fi
-          done
-
-          if [ $i -eq 3 ]; then
-            echo "Failed to check and update feeds after 3 attempts. Exiting."
-            exit 1
-          fi
-
-      - name: Download and verify packages
+      - name: Download package
+        id: package
         run: |
           cd openwrt
           make defconfig
-          make download -j$(nproc) || { echo "Download failed, retrying..."; make download -j$(nproc); }
-          find dl -size -1024c -exec rm -f {} +
+          make download -j8
+          find dl -size -1024c -exec ls -l {} \;
+          find dl -size -1024c -exec rm -f {} \;
 
-      - name: Compile firmware
+      - name: Compile the firmware
+        id: compile
         run: |
           cd openwrt
-          echo "Using $(nproc) cores for compilation"
-          make -j$(nproc) || { 
-            echo "Initial build failed, retrying with verbose output..."
-            make -j1 V=s
-          }
-          echo "ccache statistics:"
-          ccache -s
-          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | \
-            sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-          [ -s DEVICE_NAME ] && \
-            echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          echo -e "$(nproc) thread compile"
+          make -j$(nproc) || make -j1 || make -j1 V=s
+          echo "status=success" >> $GITHUB_OUTPUT
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-      - name: "Post-build - Check disk space usage"
-        run: df -h /
+      - name: Check space usage
+        if: (!cancelled())
+        run: df -hT
 
-      - name: Upload binary directory (optional)
+      - name: Upload bin directory
         uses: actions/upload-artifact@v3
-        if: success() && env.UPLOAD_BIN_DIR == 'true'
+        if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
         with:
           name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: openwrt/bin
 
-      - name: Organize firmware files
+      - name: Organize files
+        id: organize
+        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
         run: |
           cd openwrt/bin/targets/*/*
           rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+          echo "status=success" >> $GITHUB_OUTPUT
 
-      - name: Upload firmware
-        if: steps.organize.outputs.status == 'success' && !cancelled()
+      - name: Upload firmware directory
         uses: actions/upload-artifact@v3
+        if: steps.organize.outputs.status == 'success' && !cancelled()
         with:
-          name: OpenWrt_firmware
+          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
 
-      - name: Create release tag (optional)
-        if: env.UPLOAD_RELEASE == 'true'
+      - name: Upload firmware to cowtransfer
+        id: cowtransfer
+        if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
         run: |
-          echo "::set-output name=status::success"
-          echo "DATE=$(date "+%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> \
-            $GITHUB_OUTPUT
+          curl -fsSL git.io/file-transfer | sh
+          ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
+          echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
+          echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
 
-      - name: Upload firmware to GitHub Release (optional)
+      - name: Upload firmware to WeTransfer
+        id: wetransfer
+        if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+        run: |
+          curl -fsSL git.io/file-transfer | sh
+          ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
+          echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+          echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+
+      - name: Generate release tag
+        id: tag
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        run: |
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+          touch release.txt
+          [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
+          [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware to release
         uses: softprops/action-gh-release@v1
-        if: success() && env.UPLOAD_RELEASE == 'true'
+        if: steps.tag.outputs.status == 'success' && !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
           files: ${{ env.FIRMWARE }}/*
 
-      - name: Cleanup old workflow runs
+      - name: Delete workflow runs
         uses: GitRML/delete-workflow-runs@main
         with:
           retain_days: 1
           keep_minimum_runs: 3
 
-      - name: Remove old releases (optional)
-        uses: dev-drprasad/delete-older-releases@v0.1.0
-        if: env.UPLOAD_RELEASE == true
+      - name: Remove old Releases
+        uses: dev-drprasad/delete-older-releases@v0.3.2
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:
           keep_latest: 3
           delete_tags: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache OpenWrt build
-        uses: actions/cache@v3
-        with:
-          path: |
-            openwrt/build_dir
-            openwrt/staging_dir
-            openwrt/dl
-          key: ${{ runner.os }}-openwrt-${{ hashFiles('**/feeds.conf.default') }}
-          restore-keys: |
-            ${{ runner.os }}-openwrt-
-
-      - name: Cache dependencies
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cache/pip
-            ~/.openwrt/dl
-          key: ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-dependencies-
