@@ -38,7 +38,7 @@ env:
   TZ: Europe/Kiev
   BUILD_THREADS: 2
   HOSTS_URL: https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts
-  CACHE_KEY: openwrt-${{ hashFiles('openwrt/.config') }}
+  CACHE_KEY: openwrt-cache
 
 jobs:
   build:
@@ -103,12 +103,12 @@ jobs:
           TMP_FILE="/tmp/hosts_tmp"
           wget -qO "$TMP_FILE" "$CHECK_URL"
           NEW_DATE=$(grep "^# Date:" "$TMP_FILE" | sed 's/^# Date: //')
-          if [ -f "$LAST_DATE_FILE" ]; then
+          if [ -f "$LAST_DATE_FILE" ] then
               LAST_DATE=$(cat "$LAST_DATE_FILE")
           else
               LAST_DATE=""
           fi
-          if [ "$NEW_DATE" != "$LAST_DATE" ]; then
+          if [ "$NEW_DATE" != "$LAST_DATE" ] then
               mv "$TMP_FILE" "$HOSTS_FILE"
               echo "$NEW_DATE" > "$LAST_DATE_FILE"
               /etc/init.d/dnsmasq restart
@@ -124,9 +124,9 @@ jobs:
           path: |
             openwrt/dl
             openwrt/staging_dir
-          key: ${{ runner.os }}-${{ env.CACHE_KEY }}
+          key: ${{ runner.os }}-${{ env.CACHE_KEY }}-${{ hashFiles('openwrt/.config') }}
           restore-keys: |
-            ${{ runner.os }}-${{ env.CACHE_KEY }}
+            ${{ runner.os }}-${{ env.CACHE_KEY }}-
 
       - name: Download package
         id: package
