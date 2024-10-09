@@ -1,4 +1,17 @@
+# File: .github/workflows/update-checker.yml
 ---
+# Inspired by P3TERX <https://p3terx.com>
+#
+# This file is part of Project Name and is released under the MIT License.
+# See the LICENSE file for more details.
+#
+# Description: This workflow checks for updates in the OpenWrt repository and triggers a build if changes are detected.
+#
+# Key features:
+# - Checks for updates in the OpenWrt repository
+# - Triggers a build if changes are detected
+# - Deletes old workflow runs to optimize disk space
+
 name: Update Checker
 env:
   REPO_URL: https://git.openwrt.org/openwrt/openwrt.git
@@ -7,7 +20,7 @@ env:
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *" # Каждый день в 00:00 по UTC
+    - cron: "0 0 * * *"
 
 jobs:
   check:
@@ -54,7 +67,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: Source Code Update
 
-      - name: Delete workflow runs
+      - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -62,3 +75,4 @@ jobs:
           retain_days: 1
           keep_minimum_runs: 1
           delete_workflow_pattern: update-checker.yml
+          delete_run_by_conclusion_pattern: success,failure,cancelled
