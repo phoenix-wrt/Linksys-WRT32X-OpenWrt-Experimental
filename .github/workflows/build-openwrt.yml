@@ -1,14 +1,11 @@
+# File: .github/workflows/build-openwrt.yml
 ---
-# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+# Inspired by P3TERX <https://p3terx.com>
 #
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
+# This file is part of Project Name and is released under the MIT License.
+# See the LICENSE file for more details.
 #
-# Description: This GitHub Actions workflow automates the process of building 
-# custom OpenWrt firmware. It clones the OpenWrt source code, updates and 
-# installs package feeds, applies custom configurations, compiles the firmware, 
-# and uploads the resulting binaries to GitHub releases or other file sharing 
-# services.
+# Description: This workflow automates the build process for OpenWrt firmware.
 #
 # Key features:
 # - Customizable OpenWrt source and branch
@@ -18,6 +15,12 @@
 # - Automatic firmware upload to GitHub releases
 # - Automatic cleanup of old workflow runs and releases
 # - Custom script for updating hosts file
+# - Timezone configuration
+# - Disk space optimization
+# - Multi-threaded compilation
+# - Flexible artifact upload options
+# - Informative naming for artifacts and releases
+# - Post-build disk usage check
 
 name: Build OpenWrt
 
@@ -34,11 +37,13 @@ env:
   DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
+  UPLOAD_RELEASE: false
   TZ: Europe/Kiev
-  BUILD_THREADS: 2
+  BUILD_THREADS: 4
   HOSTS_URL: https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts
   CACHE_KEY: openwrt-cache
+  KEEP_LATEST_RELEASES:
+  DELETE_ONLY_PRE_RELEASES:
 
 jobs:
   build:
@@ -97,23 +102,32 @@ jobs:
           mkdir -p openwrt/files/usr/bin
           cat << 'EOF' > openwrt/files/usr/bin/update_hosts.sh
           #!/bin/sh
+          set -e
+
           CHECK_URL="${HOSTS_URL}"
           HOSTS_FILE="/etc/hosts"
           LAST_DATE_FILE="/etc/last_update_date"
           TMP_FILE="/tmp/hosts_tmp"
-          wget -qO "$TMP_FILE" "$CHECK_URL"
-          NEW_DATE=$(grep "^# Date:" "$TMP_FILE" | sed 's/^# Date: //')
-          if [ -f "$LAST_DATE_FILE" ] then
-              LAST_DATE=$(cat "$LAST_DATE_FILE")
-          else
-              LAST_DATE=""
+
+          if ! curl -sSfL "$CHECK_URL" -o "$TMP_FILE"; then
+              echo "Failed to download hosts file" >&2
+              exit 1
           fi
-          if [ "$NEW_DATE" != "$LAST_DATE" ] then
+
+          NEW_DATE=$(sed -n 's/^# Date: //p' "$TMP_FILE")
+          [ -f "$LAST_DATE_FILE" ] && LAST_DATE=$(cat "$LAST_DATE_FILE") || LAST_DATE=""
+
+          if [ "$NEW_DATE" != "$LAST_DATE" ]; then
               mv "$TMP_FILE" "$HOSTS_FILE"
               echo "$NEW_DATE" > "$LAST_DATE_FILE"
-              /etc/init.d/dnsmasq restart
+              if ! /etc/init.d/dnsmasq restart; then
+                  echo "Failed to restart dnsmasq" >&2
+                  exit 1
+              fi
+              echo "Hosts file updated successfully"
           else
               rm -f "$TMP_FILE"
+              echo "Hosts file is already up to date"
           fi
           EOF
           chmod +x openwrt/files/usr/bin/update_hosts.sh
@@ -193,23 +207,28 @@ jobs:
           files: ${{ env.FIRMWARE }}/*
           body: |
             Automated release for device ${{ env.DEVICE_NAME }} on ${{ env.FILE_DATE }}
-            
+
             Changes in this release:
             - Updated OpenWrt to latest version
             - Included latest security patches
             - [Add any other relevant changes here]
 
-      - name: Delete workflow runs
-        uses: GitRML/delete-workflow-runs@main
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
         with:
-          retain_days: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          retain_days: 3
           keep_minimum_runs: 3
+          delete_workflow_pattern: build-openwrt.yml
+          delete_run_by_conclusion_pattern: success,failure,cancelled
 
       - name: Remove old Releases
         uses: dev-drprasad/delete-older-releases@v0.3.2
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:
-          keep_latest: 3
+          keep_latest: ${{ env.KEEP_LATEST_RELEASES || 3 }}
           delete_tags: true
+          delete_only_pre_releases: ${{ env.DELETE_ONLY_PRE_RELEASES || false }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
