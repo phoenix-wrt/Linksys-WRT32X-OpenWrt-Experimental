@@ -73,19 +73,19 @@ jobs:
           sudo chown $USER:$GROUPS /workdir
 
       - name: Clean up disk space
-  run: |
-    sudo apt-get remove --purge -y man-db
-    sudo apt-get clean
-    sudo rm -rf /usr/local/share/locale
-    sudo rm -rf /var/lib/apt/lists/*
-    sudo rm -rf /tmp/*
-    sudo rm -rf /workdir/*
-    sudo rm -rf /usr/share/dotnet
-    sudo rm -rf /usr/local/lib/android
-    sudo rm -rf /opt/ghc
-    sudo rm -rf /opt/hostedtoolcache/CodeQL
-    docker rmi $(docker image ls -aq)
-    df -h
+        run: |
+          sudo apt-get remove --purge -y man-db
+          sudo apt-get clean
+          sudo rm -rf /usr/local/share/locale
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /tmp/*
+          sudo rm -rf /workdir/*
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          docker rmi $(docker image ls -aq)
+          df -h
       - name: Clone source code
         working-directory: /workdir
         run: |
@@ -227,8 +227,8 @@ jobs:
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v1
         if: >-
-          github.event.inputs.release == 'true' && 
-          !failure() && 
+          github.event.inputs.release == 'true' &&
+          !failure() &&
           !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -238,7 +238,7 @@ jobs:
           body: |
             This is an automated build of OpenWrt firmware for supported devices.
             Built on: ${{ steps.date.outputs.date }}
-            
+
             SHA256 checksums:
             ${{ steps.sha256sum.outputs.checksums }}
 
