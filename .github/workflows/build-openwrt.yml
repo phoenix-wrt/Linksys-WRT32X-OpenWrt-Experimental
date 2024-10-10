@@ -51,7 +51,6 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Europe/Kiev
-  BUILD_THREADS: 4
   HOSTS_URL: https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts
   CACHE_KEY: openwrt-cache
   KEEP_LATEST_RELEASES:
@@ -71,22 +70,26 @@ jobs:
           sudo timedatectl set-timezone "$TZ"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
+          
+          TOTAL_CORES=$(nproc)
+          TOTAL_MEMORY_MB=$(free -m | awk '/^Mem:/{print $2}')
+          MEMORY_PER_THREAD=2048  # Assume each thread needs 2GB RAM
+          THREADS_BY_MEMORY=$((TOTAL_MEMORY_MB / MEMORY_PER_THREAD))
+          OPTIMAL_THREADS=$((TOTAL_CORES < THREADS_BY_MEMORY ? TOTAL_CORES : THREADS_BY_MEMORY))
+          OPTIMAL_THREADS=$((OPTIMAL_THREADS > 1 ? OPTIMAL_THREADS : 1))
+          
+          echo "BUILD_THREADS=$OPTIMAL_THREADS" >> $GITHUB_ENV
+          echo "Using $OPTIMAL_THREADS threads for compilation"
 
       - name: Clean up disk space
         run: |
-          sudo apt-get remove --purge -y man-db
-          sudo apt-get clean
-          sudo rm -rf /usr/local/share/locale
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /tmp/*
-          sudo rm -rf /workdir/*
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          docker rmi $(docker image ls -aq)
+          set -e
+          sudo apt-get autoremove -y && sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/* /tmp/* /workdir/*
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker rmi $(docker image ls -aq) || true
           df -h
-          
+
       - name: Clone source code
         working-directory: /workdir
         run: |
@@ -125,9 +128,17 @@ jobs:
           HOSTS_FILE="/etc/hosts"
           LAST_DATE_FILE="/etc/last_update_date"
           TMP_FILE="/tmp/hosts_tmp"
+          BAK_FILE="/tmp/hosts.bak"
 
           if ! curl -sSfL "$CHECK_URL" -o "$TMP_FILE"; then
               echo "Failed to download hosts file" >&2
+              exit 1
+          fi
+
+          # Check if the downloaded file is not empty and has the expected format
+          if [ ! -s "$TMP_FILE" ] || ! grep -q "^# Title: StevenBlack/hosts" "$TMP_FILE"; then
+              echo "Downloaded file is empty or has unexpected format" >&2
+              rm -f "$TMP_FILE"
               exit 1
           fi
 
@@ -135,13 +146,23 @@ jobs:
           [ -f "$LAST_DATE_FILE" ] && LAST_DATE=$(cat "$LAST_DATE_FILE") || LAST_DATE=""
 
           if [ "$NEW_DATE" != "$LAST_DATE" ]; then
+              # Backup the old hosts file to /tmp
+              cp "$HOSTS_FILE" "$BAK_FILE"
+
+              # Update the hosts file
               mv "$TMP_FILE" "$HOSTS_FILE"
               echo "$NEW_DATE" > "$LAST_DATE_FILE"
+
+              # Restart dnsmasq
               if ! /etc/init.d/dnsmasq restart; then
-                  echo "Failed to restart dnsmasq" >&2
+                  echo "Failed to restart dnsmasq. Reverting changes." >&2
+                  mv "$BAK_FILE" "$HOSTS_FILE"
+                  rm -f "$LAST_DATE_FILE"
                   exit 1
               fi
+
               echo "Hosts file updated successfully"
+              rm -f "$BAK_FILE"  # Remove backup after successful update
           else
               rm -f "$TMP_FILE"
               echo "Hosts file is already up to date"
@@ -172,8 +193,11 @@ jobs:
         id: compile
         run: |
           cd openwrt
-          echo -e "${BUILD_THREADS} thread compile"
-          make -j${BUILD_THREADS} || make -j1 V=s
+          echo -e "Using ${BUILD_THREADS} threads for compilation"
+          make -j${BUILD_THREADS} || {
+            echo "Error: Compilation failed. Retrying with verbose output..."
+            make V=s
+          }
           echo "status=success" >> $GITHUB_OUTPUT
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
           [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
