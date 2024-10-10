@@ -91,9 +91,15 @@ jobs:
       - name: Check for relevant changes
         id: check
         run: |
-          config_changes=$(grep -w -f <(sed 's/=.*//g' $CONFIG_FILE) changes.txt || true)
-          echo "Relevant changes found:"
-          echo "$config_changes"
+          # Извлекаем имена пакетов и модулей из конфигурационного файла
+          config_packages=$(sed -n 's/^CONFIG_PACKAGE_\([^=]*\)=y/\1/p' $CONFIG_FILE | tr '-' ' ')
+          
+          # Создаем регулярное выражение для поиска
+          search_regex=$(echo "$config_packages" | tr ' ' '|')
+          
+          # Ищем совпадения в изменениях
+          config_changes=$(grep -iE "$search_regex" changes.txt || true)
+          
           if [ -n "$config_changes" ]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "changes<<EOF" >> $GITHUB_OUTPUT
@@ -103,6 +109,9 @@ jobs:
             echo "should_build=false" >> $GITHUB_OUTPUT
             echo "changes=${{ steps.openwrt_changes.outputs.formatted_changes }}" >> $GITHUB_OUTPUT
           fi
+
+          echo "Relevant changes found:"
+          echo "$config_changes"
 
   build:
     needs: check_changes
