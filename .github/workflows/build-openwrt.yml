@@ -11,7 +11,6 @@
 # Source and Configuration:
 # - Customizable OpenWrt source and branch
 # - Support for custom feeds and configurations
-# - Intelligent build triggering based on relevant OpenWrt changes
 #
 # Build Process:
 # - Automatic package downloads and compilation
@@ -59,71 +58,7 @@ env:
   DELETE_ONLY_PRE_RELEASES:
 
 jobs:
-  check_changes:
-    runs-on: ubuntu-latest
-    outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-      changes: ${{ steps.check.outputs.changes }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Get latest OpenWrt changes
-        id: openwrt_changes
-        run: |
-          changes=$(curl -s 'https://git.openwrt.org/?p=openwrt/openwrt.git;a=log;h=HEAD' | 
-                    grep -P '^\w{40}' | 
-                    sed -n '1,50p')
-          echo "$changes" > changes.txt
-          formatted_changes=$(echo "$changes" | 
-                              sed -n '1,10p' | 
-                              awk '{print "- " $2 " " $3 ": " $0}' | 
-                              sed 's/^- [0-9a-f]\{40\} //')
-          echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
-          echo "$formatted_changes" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Display changes.txt content
-        run: |
-          echo "Content of changes.txt:"
-          cat changes.txt
-
-      - name: Check for relevant changes
-        id: check
-        run: |
-          # Извлекаем активные опции из конфигурационного файла
-          active_options=$(grep '=y$' $CONFIG_FILE | cut -d'=' -f1)
-          
-          # Разбиваем опции на отдельные слова
-          config_keywords=$(echo "$active_options" | tr '_' ' ' | tr '[:upper:]' '[:lower:]' | tr -s ' ' '\n' | sort -u)
-          
-          # Извлекаем ключевые слова из последних 50 коммитов
-          commit_keywords=$(sed 's/^[^:]*: //' changes.txt | tr -cs '[:alnum:]' '\n' | tr '[:upper:]' '[:lower:]' | sort -u)
-          
-          # Находим пересечение между ключевыми словами конфига и коммитов
-          relevant_changes=$(comm -12 <(echo "$config_keywords") <(echo "$commit_keywords"))
-          
-          if [ -n "$relevant_changes" ]; then
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "changes<<EOF" >> $GITHUB_OUTPUT
-            echo "Relevant changes found for keywords:" >> $GITHUB_OUTPUT
-            echo "$relevant_changes" >> $GITHUB_OUTPUT
-            echo "Corresponding commit messages:" >> $GITHUB_OUTPUT
-            for keyword in $relevant_changes; do
-              grep -i "$keyword" changes.txt || true
-            done >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "changes=${{ steps.openwrt_changes.outputs.formatted_changes }}" >> $GITHUB_OUTPUT
-          fi
-
-          echo "Relevant changes found:"
-          echo "$config_changes"
-
   build:
-    needs: check_changes
-    if: needs.check_changes.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -265,6 +200,18 @@ jobs:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
 
+      - name: Get latest OpenWrt changes
+        id: openwrt_changes
+        run: |
+          changes=$(curl -s 'https://git.openwrt.org/?p=openwrt/openwrt.git;a=log;h=HEAD' | 
+                    grep -P '^\w{40}' | 
+                    sed -n '1,10p' | 
+                    awk '{print "- " $2 " " $3 ": " $0}' | 
+                    sed 's/^- [0-9a-f]\{40\} //')
+          echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$changes" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Generate release tag
         id: tag
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
@@ -274,18 +221,21 @@ jobs:
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v1
-        if: steps.tag.outputs.status == 'success' && !cancelled()
+        if: >-
+          github.event.inputs.release == 'true' && 
+          !failure() && 
+          !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.tag.outputs.release_tag }}
-          name: Release ${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          tag_name: ${{ github.event.inputs.release_tag }}
           files: ${{ env.FIRMWARE }}/*
           body: |
-            Automated release for device ${{ env.DEVICE_NAME }} on ${{ env.FILE_DATE }}
-
-            Changes in this release:
-            ${{ needs.check_changes.outputs.changes }}
+            This is an automated build of OpenWrt firmware for supported devices.
+            Built on: ${{ steps.date.outputs.date }}
+            
+            SHA256 checksums:
+            ${{ steps.sha256sum.outputs.checksums }}
 
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
