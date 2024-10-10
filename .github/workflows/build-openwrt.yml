@@ -91,7 +91,7 @@ jobs:
       - name: Check for relevant changes
         id: check
         run: |
-          config_changes=$(grep -f $CONFIG_FILE changes.txt || true)
+          config_changes=$(grep -w -f <(sed 's/=.*//g' $CONFIG_FILE) changes.txt || true)
           echo "Relevant changes found:"
           echo "$config_changes"
           if [ -n "$config_changes" ]; then
