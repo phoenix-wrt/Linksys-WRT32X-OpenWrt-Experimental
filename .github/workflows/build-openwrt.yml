@@ -83,10 +83,17 @@ jobs:
           echo "$formatted_changes" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Display changes.txt content
+        run: |
+          echo "Content of changes.txt:"
+          cat changes.txt
+
       - name: Check for relevant changes
         id: check
         run: |
           config_changes=$(grep -f $CONFIG_FILE changes.txt || true)
+          echo "Relevant changes found:"
+          echo "$config_changes"
           if [ -n "$config_changes" ]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "changes<<EOF" >> $GITHUB_OUTPUT
@@ -282,4 +289,3 @@ jobs:
           delete_only_pre_releases: ${{ env.DELETE_ONLY_PRE_RELEASES || false }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
