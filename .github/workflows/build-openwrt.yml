@@ -8,19 +8,32 @@
 # Description: This workflow automates the build process for OpenWrt firmware.
 #
 # Key features:
+# Source and Configuration:
 # - Customizable OpenWrt source and branch
 # - Support for custom feeds and configurations
+# - Intelligent build triggering based on relevant OpenWrt changes
+#
+# Build Process:
 # - Automatic package downloads and compilation
 # - Caching of build dependencies for faster subsequent builds
-# - Automatic firmware upload to GitHub releases
-# - Automatic cleanup of old workflow runs and releases
-# - Custom script for updating hosts file
-# - Timezone configuration
-# - Disk space optimization
 # - Multi-threaded compilation
+# - Disk space optimization
+# - Custom script for updating hosts file
+#
+# Artifacts and Releases:
 # - Flexible artifact upload options
+# - Automatic firmware upload to GitHub releases
 # - Informative naming for artifacts and releases
+# - Automatic inclusion of recent OpenWrt changes in release notes
+#
+# Maintenance and Optimization:
+# - Automatic cleanup of old workflow runs and releases
+# - Configurable retention of releases and pre-releases
 # - Post-build disk usage check
+#
+# Environment and Error Handling:
+# - Timezone configuration
+# - Enhanced error handling and logging in custom scripts
 
 name: Build OpenWrt
 
@@ -37,7 +50,7 @@ env:
   DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: false
+  UPLOAD_RELEASE: true
   TZ: Europe/Kiev
   BUILD_THREADS: 3
   HOSTS_URL: https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts
@@ -46,9 +59,48 @@ env:
   DELETE_ONLY_PRE_RELEASES:
 
 jobs:
-  build:
+  check_changes:
     runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      changes: ${{ steps.check.outputs.changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Get latest OpenWrt changes
+        id: openwrt_changes
+        run: |
+          changes=$(curl -s 'https://git.openwrt.org/?p=openwrt/openwrt.git;a=log;h=HEAD' | 
+                    grep -P '^\w{40}' | 
+                    sed -n '1,50p')
+          echo "$changes" > changes.txt
+          formatted_changes=$(echo "$changes" | 
+                              sed -n '1,10p' | 
+                              awk '{print "- " $2 " " $3 ": " $0}' | 
+                              sed 's/^- [0-9a-f]\{40\} //')
+          echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$formatted_changes" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check for relevant changes
+        id: check
+        run: |
+          config_changes=$(grep -f $CONFIG_FILE changes.txt || true)
+          if [ -n "$config_changes" ]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "changes<<EOF" >> $GITHUB_OUTPUT
+            echo "$config_changes" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "changes=${{ steps.openwrt_changes.outputs.formatted_changes }}" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check_changes
+    if: needs.check_changes.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -209,17 +261,15 @@ jobs:
             Automated release for device ${{ env.DEVICE_NAME }} on ${{ env.FILE_DATE }}
 
             Changes in this release:
-            - Updated OpenWrt to latest version
-            - Included latest security patches
-            - [Add any other relevant changes here]
+            ${{ needs.check_changes.outputs.changes }}
 
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          retain_days: 3
-          keep_minimum_runs: 3
+          retain_days: 1
+          keep_minimum_runs: 1
           delete_workflow_pattern: build-openwrt.yml
           delete_run_by_conclusion_pattern: success,failure,cancelled
 
@@ -232,3 +282,4 @@ jobs:
           delete_only_pre_releases: ${{ env.DELETE_ONLY_PRE_RELEASES || false }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
