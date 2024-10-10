@@ -51,7 +51,7 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Europe/Kiev
-  BUILD_THREADS: 3
+  BUILD_THREADS: 4
   HOSTS_URL: https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts
   CACHE_KEY: openwrt-cache
   KEEP_LATEST_RELEASES:
@@ -59,7 +59,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,14 +73,19 @@ jobs:
           sudo chown $USER:$GROUPS /workdir
 
       - name: Clean up disk space
-        run: |
-          sudo apt-get remove --purge -y man-db
-          sudo apt-get clean
-          sudo rm -rf /usr/local/share/locale
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /tmp/*
-          sudo rm -rf /workdir/*
-
+  run: |
+    sudo apt-get remove --purge -y man-db
+    sudo apt-get clean
+    sudo rm -rf /usr/local/share/locale
+    sudo rm -rf /var/lib/apt/lists/*
+    sudo rm -rf /tmp/*
+    sudo rm -rf /workdir/*
+    sudo rm -rf /usr/share/dotnet
+    sudo rm -rf /usr/local/lib/android
+    sudo rm -rf /opt/ghc
+    sudo rm -rf /opt/hostedtoolcache/CodeQL
+    docker rmi $(docker image ls -aq)
+    df -h
       - name: Clone source code
         working-directory: /workdir
         run: |
