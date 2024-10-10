@@ -91,19 +91,27 @@ jobs:
       - name: Check for relevant changes
         id: check
         run: |
-          # Извлекаем имена пакетов и модулей из конфигурационного файла
-          config_packages=$(sed -n 's/^CONFIG_PACKAGE_\([^=]*\)=y/\1/p' $CONFIG_FILE | tr '-' ' ')
+          # Извлекаем активные опции из конфигурационного файла
+          active_options=$(grep '=y$' $CONFIG_FILE | cut -d'=' -f1)
           
-          # Создаем регулярное выражение для поиска
-          search_regex=$(echo "$config_packages" | tr ' ' '|')
+          # Разбиваем опции на отдельные слова
+          config_keywords=$(echo "$active_options" | tr '_' ' ' | tr '[:upper:]' '[:lower:]' | tr -s ' ' '\n' | sort -u)
           
-          # Ищем совпадения в изменениях
-          config_changes=$(grep -iE "$search_regex" changes.txt || true)
+          # Извлекаем ключевые слова из последних 50 коммитов
+          commit_keywords=$(sed 's/^[^:]*: //' changes.txt | tr -cs '[:alnum:]' '\n' | tr '[:upper:]' '[:lower:]' | sort -u)
           
-          if [ -n "$config_changes" ]; then
+          # Находим пересечение между ключевыми словами конфига и коммитов
+          relevant_changes=$(comm -12 <(echo "$config_keywords") <(echo "$commit_keywords"))
+          
+          if [ -n "$relevant_changes" ]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "changes<<EOF" >> $GITHUB_OUTPUT
-            echo "$config_changes" >> $GITHUB_OUTPUT
+            echo "Relevant changes found for keywords:" >> $GITHUB_OUTPUT
+            echo "$relevant_changes" >> $GITHUB_OUTPUT
+            echo "Corresponding commit messages:" >> $GITHUB_OUTPUT
+            for keyword in $relevant_changes; do
+              grep -i "$keyword" changes.txt || true
+            done >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "should_build=false" >> $GITHUB_OUTPUT
