@@ -198,12 +198,19 @@ jobs:
           make toolchain/binutils/compile V=sc || {
             echo "Error: Binutils compilation failed. Log output:"
             cat $(find ./build_dir -name "*.log" | grep binutils)
+            echo "Last 100 lines of make output:"
+            tail -n 100 $(find ./logs -name "*.txt" | grep binutils | tail -n 1)
             exit 1
           }
-          make toolchain/install -j${BUILD_THREADS}
-          make -j${BUILD_THREADS} || {
-            echo "Error: Compilation failed. Retrying with verbose output..."
-            make V=s
+          make toolchain/install -j${BUILD_THREADS} || {
+            echo "Error: Toolchain installation failed. Log output:"
+            cat $(find ./build_dir -name "*.log" | grep toolchain)
+            exit 1
+          }
+          make -j${BUILD_THREADS} V=s || {
+            echo "Error: Full compilation failed. Last 100 lines of log:"
+            tail -n 100 $(find ./logs -name "*.txt" | tail -n 1)
+            exit 1
           }
           echo "status=success" >> $GITHUB_OUTPUT
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
