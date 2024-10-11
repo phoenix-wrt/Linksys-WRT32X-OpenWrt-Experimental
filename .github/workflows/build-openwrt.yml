@@ -195,6 +195,11 @@ jobs:
           cd openwrt
           echo -e "Using ${BUILD_THREADS} threads for compilation"
           make tools/install -j${BUILD_THREADS}
+          make toolchain/binutils/compile V=sc || {
+            echo "Error: Binutils compilation failed. Log output:"
+            cat $(find ./build_dir -name "*.log" | grep binutils)
+            exit 1
+          }
           make toolchain/install -j${BUILD_THREADS}
           make -j${BUILD_THREADS} || {
             echo "Error: Compilation failed. Retrying with verbose output..."
