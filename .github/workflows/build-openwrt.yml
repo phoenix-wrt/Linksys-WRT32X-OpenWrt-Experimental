@@ -194,6 +194,8 @@ jobs:
         run: |
           cd openwrt
           echo -e "Using ${BUILD_THREADS} threads for compilation"
+          make tools/install -j${BUILD_THREADS}
+          make toolchain/install -j${BUILD_THREADS}
           make -j${BUILD_THREADS} || {
             echo "Error: Compilation failed. Retrying with verbose output..."
             make V=s
