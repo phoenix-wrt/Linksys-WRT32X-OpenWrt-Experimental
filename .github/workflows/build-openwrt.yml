@@ -107,6 +107,19 @@ jobs:
           cd openwrt
           $GITHUB_WORKSPACE/$DIY_P1_SH
 
+      - name: Generate cache key
+        id: cache_key
+        run: |
+          echo "cache_key=${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+
+      - name: Cache OpenWrt downloads
+        uses: actions/cache@v3
+        with:
+          path: openwrt/dl
+          key: ${{ steps.cache_key.outputs.cache_key }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-
+
       - name: Update feeds
         run: cd openwrt && ./scripts/feeds update -a
 
@@ -198,10 +211,7 @@ jobs:
         run: |
           cd openwrt
           echo "Compiling with $BUILD_THREADS threads"
-          start_time=$(date +%s)
           make -j$BUILD_THREADS || make -j1 V=s
-          end_time=$(date +%s)
-          echo "Compilation time: $((end_time - start_time)) seconds"
           echo "status=success" >> $GITHUB_OUTPUT
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
           [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
@@ -252,15 +262,6 @@ jobs:
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: Generate SHA256 checksums
-        if: steps.compile.outputs.status == 'success'
-        run: |
-          cd ${{ env.FIRMWARE }}
-          sha256sum * > sha256sums.txt
-          echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
-          cat sha256sums.txt >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v2
