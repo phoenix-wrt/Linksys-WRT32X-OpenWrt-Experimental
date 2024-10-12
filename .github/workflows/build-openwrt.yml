@@ -258,25 +258,32 @@ jobs:
         run: |
           cd ${{ env.FIRMWARE }}
           sha256sum * > sha256sums.txt
-          echo "CHECKSUMS=$(cat sha256sums.txt)" >> $GITHUB_ENV
+          echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
+          cat sha256sums.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v1
         if: >-
-          github.event.inputs.release == 'true' &&
-          !failure() &&
+          steps.tag.outputs.status == 'success' && 
           !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.event.inputs.release_tag }}
+          tag_name: ${{ steps.tag.outputs.release_tag }}
           files: ${{ env.FIRMWARE }}/*
           body: |
             This is an automated build of OpenWrt firmware for supported devices.
-            Built on: ${{ steps.date.outputs.date }}
+            Built on: ${{ steps.tag.outputs.release_tag }}
 
             SHA256 checksums:
+            ```
             ${{ env.CHECKSUMS }}
+            ```
+
+            Recent OpenWrt changes:
+            ${{ steps.openwrt_changes.outputs.formatted_changes }}
+```
 
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
