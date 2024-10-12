@@ -42,22 +42,18 @@ jobs:
       - name: Get latest OpenWrt changes
         id: openwrt_changes
         run: |
-          echo "Checking OpenWrt git log URL..."
-          curl -v 'https://git.openwrt.org/?p=openwrt/openwrt.git;a=log;h=HEAD'
+          echo "Fetching latest OpenWrt changes from GitHub API..."
+          changes=$(curl -s 'https://api.github.com/repos/openwrt/openwrt/commits' | 
+                    jq -r '.[:10] | map("- " + (.commit.author.date | .[0:10]) + ": " + (.commit.message | split("\n")[0])) | .[]')
           
-          changes=$(curl -s 'https://git.openwrt.org/?p=openwrt/openwrt.git;a=log;h=HEAD' | 
-                    grep -P '^\w{40}' | 
-                    sed -n '1,10p' | 
-                    awk '{print "- " $2 " " $3 ": " $0}' | 
-                    sed 's/^- [0-9a-f]\{40\} //')
-          
-          echo "Debug: Raw curl output:"
-          curl -s 'https://git.openwrt.org/?p=openwrt/openwrt.git;a=log;h=HEAD'
-          
-          echo "Debug: Processed changes:"
+          echo "Debug: Latest OpenWrt changes:"
           echo "$changes"
+          
+          if [ -z "$changes" ]; then
+            echo "Warning: No changes fetched. Using placeholder message."
+            changes="Unable to fetch recent changes. Please check the OpenWrt repository for updates."
+          fi
           
           echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
           echo "$changes" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          
