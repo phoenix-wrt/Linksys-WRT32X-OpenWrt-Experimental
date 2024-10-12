@@ -280,10 +280,10 @@ jobs:
             ```
             ${{ env.CHECKSUMS }}
             ```
-
+            
             Recent OpenWrt changes:
             ${{ steps.openwrt_changes.outputs.formatted_changes }}
-```
+            ```
 
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
