@@ -255,6 +255,10 @@ jobs:
           echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
           echo "$changes" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+         
+          # Отладочный вывод
+          echo "Debug: Latest OpenWrt changes:"
+          echo "$changes"
 
       - name: Generate release tag
         id: tag
