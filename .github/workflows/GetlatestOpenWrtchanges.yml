@@ -1,0 +1,57 @@
+---
+name: Get latest OpenWrt changes
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+
+env:
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  TZ: Europe/Kiev
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo timedatectl set-timezone "$TZ"
+          sudo mkdir -p /workdir
+          sudo chown $USER:$GROUPS /workdir
+
+          TOTAL_CORES=$(nproc)
+          TOTAL_MEMORY_MB=$(free -m | awk '/^Mem:/{print $2}')
+          MEMORY_PER_THREAD=2048  # Assume each thread needs 2GB RAM
+          THREADS_BY_MEMORY=$((TOTAL_MEMORY_MB / MEMORY_PER_THREAD))
+          OPTIMAL_THREADS=$((TOTAL_CORES < THREADS_BY_MEMORY ? TOTAL_CORES : THREADS_BY_MEMORY))
+          OPTIMAL_THREADS=$((OPTIMAL_THREADS > 1 ? OPTIMAL_THREADS : 1))
+
+          if [ $TOTAL_MEMORY_MB -lt 4096 ]; then
+            echo "Warning: Less than 4GB of RAM available. Build may fail or be very slow."
+          fi
+
+          echo "BUILD_THREADS=$OPTIMAL_THREADS" >> $GITHUB_ENV
+          echo "Using $OPTIMAL_THREADS threads for compilation"
+
+      - name: Get latest OpenWrt changes
+        id: openwrt_changes
+        run: |
+          changes=$(curl -s 'https://git.openwrt.org/?p=openwrt/openwrt.git;a=log;h=HEAD' | 
+                    grep -P '^\w{40}' | 
+                    sed -n '1,10p' | 
+                    awk '{print "- " $2 " " $3 ": " $0}' | 
+                    sed 's/^- [0-9a-f]\{40\} //')
+          echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$changes" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+         
+          # Отладочный вывод
+          echo "Debug: Latest OpenWrt changes:"
+          echo "$changes"
+          
