@@ -43,7 +43,7 @@ jobs:
         id: openwrt_changes
         run: |
           echo "Fetching latest OpenWrt changes from GitHub API..."
-          changes=$(curl -s 'https://api.github.com/repos/openwrt/openwrt/commits' | 
+          changes=$(curl -s 'https://api.github.com/repos/openwrt/openwrt/commits?sha=${{ env.REPO_BRANCH }}' | 
                     jq -r '.[:10] | map("- " + (.commit.author.date | .[0:10]) + ": " + (.commit.message | split("\n")[0])) | .[]')
           
           echo "Debug: Latest OpenWrt changes:"
