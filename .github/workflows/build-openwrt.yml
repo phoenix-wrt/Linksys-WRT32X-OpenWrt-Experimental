@@ -69,18 +69,18 @@ jobs:
           sudo timedatectl set-timezone "$TZ"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
-          
+
           TOTAL_CORES=$(nproc)
           TOTAL_MEMORY_MB=$(free -m | awk '/^Mem:/{print $2}')
           MEMORY_PER_THREAD=2048  # Assume each thread needs 2GB RAM
           THREADS_BY_MEMORY=$((TOTAL_MEMORY_MB / MEMORY_PER_THREAD))
           OPTIMAL_THREADS=$((TOTAL_CORES < THREADS_BY_MEMORY ? TOTAL_CORES : THREADS_BY_MEMORY))
           OPTIMAL_THREADS=$((OPTIMAL_THREADS > 1 ? OPTIMAL_THREADS : 1))
-          
+
           if [ $TOTAL_MEMORY_MB -lt 4096 ]; then
             echo "Warning: Less than 4GB of RAM available. Build may fail or be very slow."
           fi
-          
+
           echo "BUILD_THREADS=$OPTIMAL_THREADS" >> $GITHUB_ENV
           echo "Using $OPTIMAL_THREADS threads for compilation"
 
@@ -263,7 +263,7 @@ jobs:
           echo "EOF" >> $GITHUB_ENV
 
       - name: Upload firmware to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: >-
           steps.tag.outputs.status == 'success' && 
           !cancelled()
@@ -276,14 +276,8 @@ jobs:
             This is an automated build of OpenWrt firmware for supported devices.
             Built on: ${{ steps.tag.outputs.release_tag }}
 
-            SHA256 checksums:
-            ```
-            ${{ env.CHECKSUMS }}
-            ```
-            
             Recent OpenWrt changes:
             ${{ steps.openwrt_changes.outputs.formatted_changes }}
-            ```
 
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
@@ -296,11 +290,11 @@ jobs:
           delete_run_by_conclusion_pattern: success,failure,cancelled
 
       - name: Remove old Releases
-        uses: dev-drprasad/delete-older-releases@v0.3.2
+        uses: dev-drprasad/delete-older-releases@v0.3.3
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:
           keep_latest: ${{ env.KEEP_LATEST_RELEASES || 3 }}
           delete_tags: true
-          delete_only_pre_releases: ${{ env.DELETE_ONLY_PRE_RELEASES || false }}
+          delete_prerelease_only: ${{ env.DELETE_ONLY_PRE_RELEASES || false }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
