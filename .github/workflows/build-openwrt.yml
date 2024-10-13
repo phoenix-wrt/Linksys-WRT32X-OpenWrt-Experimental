@@ -115,8 +115,16 @@ jobs:
           if command -v docker &> /dev/null; then
             docker rmi $(docker image ls -aq) || true
           fi
-          sudo find /workdir -mindepth 1 -maxdepth 1 ! -name 'openwrt' -exec rm -rf {} +
-          sudo find /workdir/openwrt -mindepth 1 -maxdepth 1 ! -name 'dl' ! -name 'build_dir' ! -name 'staging_dir' ! -name 'toolchain' -exec rm -rf {} +
+          if [ -d "/workdir" ]; then
+            sudo find /workdir -mindepth 1 -maxdepth 1 ! -name 'openwrt' -exec rm -rf {} +
+            if [ -d "/workdir/openwrt" ]; then
+              sudo find /workdir/openwrt -mindepth 1 -maxdepth 1 ! -name 'dl' ! -name 'build_dir' ! -name 'staging_dir' ! -name 'toolchain' -exec rm -rf {} +
+            else
+              echo "Warning: /workdir/openwrt directory not found"
+            fi
+          else
+            echo "Warning: /workdir directory not found"
+          fi
           df -h
 
       - name: Clone source code
@@ -348,15 +356,23 @@ jobs:
 
       - name: Clean old caches
         run: |
-          mkdir -p /tmp/empty
-           rsync -a --delete --delete-excluded --prune-empty-dirs \
-            --include '*/' --include '*.xz' --include '*.gz' --include '*.zip' \
-            --exclude '*' --max-size=100M \
-            --modify-window=2592000 /tmp/empty/ openwrt/dl/
-           rsync -a --delete --delete-excluded --prune-empty-dirs \
-            --include '*/' --exclude '*' \
-            --modify-window=604800 /tmp/empty/ openwrt/build_dir/
-          rm -rf /tmp/empty
+          if [ -d "/workdir/openwrt" ]; then
+            mkdir -p /tmp/empty
+            if [ -d "/workdir/openwrt/dl" ]; then
+              rsync -a --delete --delete-excluded --prune-empty-dirs \
+                --include '*/' --include '*.xz' --include '*.gz' --include '*.zip' \
+                --exclude '*' --max-size=100M \
+                --modify-window=2592000 /tmp/empty/ /workdir/openwrt/dl/
+            fi
+            if [ -d "/workdir/openwrt/build_dir" ]; then
+              rsync -a --delete --delete-excluded --prune-empty-dirs \
+                --include '*/' --exclude '*' \
+                --modify-window=604800 /tmp/empty/ /workdir/openwrt/build_dir/
+            fi
+            rm -rf /tmp/empty
+          else
+            echo "Warning: /workdir/openwrt directory not found, skipping cache cleanup"
+          fi
 
       - name: Check compilation result
         if: steps.compile.outputs.status == 'success'
