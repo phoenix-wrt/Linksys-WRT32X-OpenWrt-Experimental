@@ -67,8 +67,8 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo timedatectl set-timezone "$TZ"
-          sudo mkdir -p /workdir/openwrt /workdir/tmp
-          sudo chown $USER:$USER /workdir/openwrt /workdir/tmp
+          sudo mkdir -p /workdir
+          sudo chown $USER:$GROUPS /workdir
 
           TOTAL_CORES=$(nproc)
           TOTAL_MEMORY_MB=$(free -m | awk '/^Mem:/{print $2}')
@@ -86,59 +86,31 @@ jobs:
 
       - name: Clean up disk space
         run: |
-          sudo apt-get autoremove -y
-          sudo apt-get clean
-          
-          dirs_to_remove=(
-            "/workdir/tmp"
-            "/var/lib/apt/lists"
-            "/usr/share/dotnet"
-            "/usr/local/lib/android"
-            "/opt/ghc"
-            "/opt/hostedtoolcache/CodeQL"
-          )
-          
-          for dir in "${dirs_to_remove[@]}"; do
-            if [ -d "$dir" ]; then
-              sudo rm -rf "$dir"/*
-              echo "Cleaned $dir"
-            else
-              echo "Directory $dir does not exist, skipping"
-            fi
-          done
-          
+          sudo apt-get autoremove -y && sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/* /tmp/* /workdir/*
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           if command -v docker &> /dev/null; then
-            docker system prune -af
-          else
-            echo "Docker not found, skipping Docker cleanup"
+            docker rmi $(docker image ls -aq) || true
           fi
-          
-          echo "Disk space after cleanup:"
           df -h
 
       - name: Clone source code
-        working-directory: /workdir/openwrt
+        working-directory: /workdir
         run: |
-          set -e
-          git clone $REPO_URL -b $REPO_BRANCH --depth 1 .
-          echo "OPENWRT_VERSION=$(git describe --tags --always)" >> $GITHUB_ENV
+          git clone $REPO_URL -b $REPO_BRANCH --depth 1 openwrt
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-      - name: Generate cache key and prepare feeds
+      - name: Load custom feeds
+        run: |
+          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+          chmod +x $DIY_P1_SH
+          cd openwrt
+          $GITHUB_WORKSPACE/$DIY_P1_SH
+
+      - name: Generate cache key
         id: cache_key
         run: |
-          set -e
-          if [ -e $FEEDS_CONF ]; then
-            mv $FEEDS_CONF openwrt/feeds.conf.default
-          fi
-          if [ -e files ]; then
-            mv files openwrt/files
-          fi
-          
-          config_hash=$(md5sum openwrt/.config | awk '{print $1}')
-          feeds_hash=$(md5sum openwrt/feeds.conf.default | awk '{print $1}')
-          cache_key="${{ runner.os }}-openwrt-$config_hash-$feeds_hash"
-          echo "cache_key=$cache_key" >> $GITHUB_OUTPUT
-          echo "Generated cache key: $cache_key"
+          echo "cache_key=${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
 
       - name: Cache OpenWrt downloads
         uses: actions/cache@v3
@@ -148,14 +120,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-openwrt-
 
-      - name: Load custom configuration and update feeds
+      - name: Update feeds
+        run: cd openwrt && ./scripts/feeds update -a
+
+      - name: Install feeds
+        run: cd openwrt && ./scripts/feeds install -a
+
+      - name: Load custom configuration
         run: |
+          [ -e files ] && mv files openwrt/files
           [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-          chmod +x $DIY_P1_SH $DIY_P2_SH
+          chmod +x $DIY_P2_SH
           cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P1_SH
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
           $GITHUB_WORKSPACE/$DIY_P2_SH
 
       - name: Create update_hosts.sh
@@ -222,53 +198,42 @@ jobs:
 
       - name: Check disk space before compilation
         run: |
-          echo "Available disk space before compilation:"
+          echo "Available disk space:"
           df -h
           FREE_SPACE=$(df -k --output=avail / | tail -n1)
-          if ! [[ "$FREE_SPACE" =~ ^[0-9]+$ ]]; then
-            echo "Error: Failed to get free space value"
-            exit 1
-          fi
           if [ $FREE_SPACE -lt 10485760 ]; then  # 10GB in KB
             echo "Error: Not enough disk space to proceed with compilation"
-            echo "Available space: $((FREE_SPACE / 1024)) MB"
             exit 1
           fi
-          echo "Available space: $((FREE_SPACE / 1024)) MB"
 
       - name: Compile the firmware
         id: compile
         run: |
           cd openwrt
-          chmod +x $GITHUB_WORKSPACE/compile.sh
-          if $GITHUB_WORKSPACE/compile.sh $BUILD_THREADS; then
-            echo "status=success" >> $GITHUB_OUTPUT
-            grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-            [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
-            echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-          else
-            echo "status=failure" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          echo "Compiling with $BUILD_THREADS threads"
+          make -j$BUILD_THREADS || make -j1 V=s
+          echo "status=success" >> $GITHUB_OUTPUT
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+      - name: Check space usage
+        if: (!cancelled())
+        run: df -hT
 
       - name: Upload bin directory
         uses: actions/upload-artifact@v4
-        if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR && !cancelled()
+        if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
         with:
           name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: openwrt/bin
 
       - name: Organize files
         id: organize
-        if: env.UPLOAD_FIRMWARE && !cancelled()
+        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
         run: |
           cd openwrt/bin/targets/*/*
-          if [ -d packages ]; then
-            echo "Removing packages directory"
-            rm -rf packages
-          else
-            echo "packages directory not found, skipping removal"
-          fi
+          rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
 
@@ -283,58 +248,41 @@ jobs:
         id: openwrt_changes
         run: |
           echo "Fetching latest OpenWrt changes from GitHub API..."
-          
-          if [ -z "$REPO_BRANCH" ] || ! [[ "$REPO_BRANCH" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
-            echo "Error: REPO_BRANCH is not set or contains invalid characters: $REPO_BRANCH"
-            exit 1
-          fi
-          
-          changes=$(curl -s "https://api.github.com/repos/openwrt/openwrt/commits?sha=$REPO_BRANCH" | 
+          changes=$(curl -s 'https://api.github.com/repos/openwrt/openwrt/commits?sha=${{ env.REPO_BRANCH }}' | 
                     jq -r '.[:10] | map("- " + (.commit.author.date | .[0:10]) + ": " + (.commit.message | split("\n")[0])) | .[]')
+          
+          echo "Debug: Latest OpenWrt changes:"
+          echo "$changes"
           
           if [ -z "$changes" ]; then
             echo "Warning: No changes fetched. Using placeholder message."
             changes="Unable to fetch recent changes. Please check the OpenWrt repository for updates."
           fi
           
-          echo "Debug: Latest OpenWrt changes:"
-          echo "$changes"
-          
           echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
           echo "$changes" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Prepare firmware files for release
-        if: steps.tag.outputs.status == 'success' && !cancelled()
-        run: |
-          cd ${{ env.FIRMWARE }}
-          find . -type f -name "*.bin" -o -name "*.img" -o -name "*.gz" | xargs -I {} cp {} ./
-          echo "FIRMWARE_FILES=$(ls *.{bin,img,gz} 2>/dev/null | xargs)" >> $GITHUB_ENV
-
       - name: Generate release tag
         id: tag
-        if: env.UPLOAD_RELEASE && !cancelled()
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v2
-        if: steps.tag.outputs.status == 'success' && !cancelled()
+        if: >-
+          steps.tag.outputs.status == 'success' && 
+          !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
-          files: |
-            ${{ env.FIRMWARE }}/*.bin
-            ${{ env.FIRMWARE }}/*.img
-            ${{ env.FIRMWARE }}/*.gz
+          files: ${{ env.FIRMWARE }}/*
           body: |
             This is an automated build of OpenWrt firmware for supported devices.
             Built on: ${{ steps.tag.outputs.release_tag }}
-
-            Firmware files included in this release:
-            ${{ env.FIRMWARE_FILES }}
 
             Recent OpenWrt changes:
             ${{ steps.openwrt_changes.outputs.formatted_changes }}
@@ -351,11 +299,10 @@ jobs:
 
       - name: Remove old Releases
         uses: dev-drprasad/delete-older-releases@v0.3.3
-        if: env.UPLOAD_RELEASE && !cancelled()
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:
           keep_latest: ${{ env.KEEP_LATEST_RELEASES }}
           delete_tags: true
           delete_prerelease_only: ${{ env.DELETE_ONLY_PRE_RELEASES }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
