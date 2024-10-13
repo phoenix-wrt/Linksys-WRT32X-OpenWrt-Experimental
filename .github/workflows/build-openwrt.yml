@@ -256,7 +256,7 @@ jobs:
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v2
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled() && steps.tag.outputs.status == 'success'
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -268,7 +268,7 @@ jobs:
             
             Device: ${{ env.DEVICE_NAME || 'Unknown' }}
             
-            ${{ env.FIRMWARE ? 'Firmware can be found in the assets below.' : 'No firmware files were generated.' }}
+            ${{ env.FIRMWARE != '' && 'Firmware can be found in the assets below.' || 'No firmware files were generated.' }}
             
             Recent OpenWrt changes:
             ${{ steps.openwrt_changes.outputs.formatted_changes || 'No recent changes information available.' }}
