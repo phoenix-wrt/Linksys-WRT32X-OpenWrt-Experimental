@@ -51,7 +51,6 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Europe/Kiev
-  HOSTS_URL: https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts
   KEEP_LATEST_RELEASES: 3
   DELETE_ONLY_PRE_RELEASES: false
 
@@ -98,14 +97,27 @@ jobs:
         working-directory: /workdir
         run: |
           git clone $REPO_URL -b $REPO_BRANCH --depth 1 openwrt
+          if [ ! -d "openwrt" ]; then
+            echo "Error: Failed to clone OpenWrt repository"
+            exit 1
+          fi
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
       - name: Load custom feeds
         run: |
-          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-          chmod +x $DIY_P1_SH
-          cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P1_SH
+          if [ -e "$FEEDS_CONF" ]; then
+            echo "Moving custom feeds file"
+            mv "$FEEDS_CONF" openwrt/feeds.conf.default
+          else
+            echo "Custom feeds file not found, using default"
+          fi
+          if [ -f "$DIY_P1_SH" ]; then
+            chmod +x "$DIY_P1_SH"
+            cd openwrt
+            $GITHUB_WORKSPACE/$DIY_P1_SH
+          else
+            echo "Custom script $DIY_P1_SH not found, skipping"
+          fi
 
       - name: Generate cache key
         id: cache_key
@@ -116,8 +128,9 @@ jobs:
         uses: actions/cache@v3
         with:
           path: openwrt/dl
-          key: ${{ steps.cache_key.outputs.cache_key }}
+          key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-${{ github.run_id }}
           restore-keys: |
+            ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-
             ${{ runner.os }}-openwrt-
 
       - name: Update feeds
@@ -128,64 +141,25 @@ jobs:
 
       - name: Load custom configuration
         run: |
-          [ -e files ] && mv files openwrt/files
-          [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-          chmod +x $DIY_P2_SH
-          cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P2_SH
-
-      - name: Create update_hosts.sh
-        run: |
-          mkdir -p openwrt/files/usr/bin
-          cat << EOF > openwrt/files/usr/bin/update_hosts.sh
-          #!/bin/sh
-          set -e
-
-          CHECK_URL="${HOSTS_URL}"
-          HOSTS_FILE="/etc/hosts"
-          LAST_DATE_FILE="/etc/last_update_date"
-          TMP_FILE="/tmp/hosts_tmp"
-          BAK_FILE="/tmp/hosts.bak"
-
-          if ! curl -sSfL "$CHECK_URL" -o "$TMP_FILE"; then
-              echo "Failed to download hosts file" >&2
-              exit 1
-          fi
-
-          # Check if the downloaded file is not empty and has the expected format
-          if [ ! -s "$TMP_FILE" ] || ! grep -q "^# Title: StevenBlack/hosts" "$TMP_FILE"; then
-              echo "Downloaded file is empty or has unexpected format" >&2
-              rm -f "$TMP_FILE"
-              exit 1
-          fi
-
-          NEW_DATE=$(sed -n 's/^# Date: //p' "$TMP_FILE")
-          [ -f "$LAST_DATE_FILE" ] && LAST_DATE=$(cat "$LAST_DATE_FILE") || LAST_DATE=""
-
-          if [ "$NEW_DATE" != "$LAST_DATE" ]; then
-              # Backup the old hosts file to /tmp
-              cp "$HOSTS_FILE" "$BAK_FILE"
-
-              # Update the hosts file
-              mv "$TMP_FILE" "$HOSTS_FILE"
-              echo "$NEW_DATE" > "$LAST_DATE_FILE"
-
-              # Restart dnsmasq
-              if ! /etc/init.d/dnsmasq restart; then
-                  echo "Failed to restart dnsmasq. Reverting changes." >&2
-                  mv "$BAK_FILE" "$HOSTS_FILE"
-                  rm -f "$LAST_DATE_FILE"
-                  exit 1
-              fi
-
-              echo "Hosts file updated successfully"
-              rm -f "$BAK_FILE"  # Remove backup after successful update
+          if [ -e "files" ]; then
+            echo "Moving custom files"
+            mv files openwrt/files
           else
-              rm -f "$TMP_FILE"
-              echo "Hosts file is already up to date"
+            echo "No custom files to move"
           fi
-          EOF
-          chmod +x openwrt/files/usr/bin/update_hosts.sh
+          if [ -e "$CONFIG_FILE" ]; then
+            echo "Moving custom config file"
+            mv "$CONFIG_FILE" openwrt/.config
+          else
+            echo "Custom config file not found, using default"
+          fi
+          if [ -f "$DIY_P2_SH" ]; then
+            chmod +x "$DIY_P2_SH"
+            cd openwrt
+            $GITHUB_WORKSPACE/$DIY_P2_SH
+          else
+            echo "Custom script $DIY_P2_SH not found, skipping"
+          fi
 
       - name: Download package
         id: package
@@ -214,7 +188,13 @@ jobs:
           make -j$BUILD_THREADS || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          DEVICE_NAME=$(cat DEVICE_NAME)
+          if [ -n "$DEVICE_NAME" ]; then
+            echo "DEVICE_NAME=_${DEVICE_NAME}" >> $GITHUB_ENV
+          else
+            echo "DEVICE_NAME is empty, using default value"
+            echo "DEVICE_NAME=_unknown" >> $GITHUB_ENV
+          fi
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
       - name: Check space usage
@@ -223,7 +203,7 @@ jobs:
 
       - name: Upload bin directory
         uses: actions/upload-artifact@v4
-        if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+        if: env.UPLOAD_BIN_DIR == 'true' && !cancelled()
         with:
           name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: openwrt/bin
@@ -239,7 +219,7 @@ jobs:
 
       - name: Upload firmware directory
         uses: actions/upload-artifact@v4
-        if: steps.organize.outputs.status == 'success' && !cancelled()
+        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
         with:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
@@ -267,14 +247,16 @@ jobs:
         id: tag
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         run: |
-          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+          if [ -z "${{ env.FILE_DATE }}" ]; then
+            echo "Error: FILE_DATE is not set"
+            exit 1
+          fi
+          echo "release_tag=$(date +"%Y.%m.%d")${{ env.FILE_DATE }}" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v2
-        if: >-
-          steps.tag.outputs.status == 'success' && 
-          !cancelled()
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled() && steps.tag.outputs.status == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -283,9 +265,13 @@ jobs:
           body: |
             This is an automated build of OpenWrt firmware for supported devices.
             Built on: ${{ steps.tag.outputs.release_tag }}
-
+            
+            Device: ${{ env.DEVICE_NAME || 'Unknown' }}
+            
+            ${{ env.FIRMWARE ? 'Firmware can be found in the assets below.' : 'No firmware files were generated.' }}
+            
             Recent OpenWrt changes:
-            ${{ steps.openwrt_changes.outputs.formatted_changes }}
+            ${{ steps.openwrt_changes.outputs.formatted_changes || 'No recent changes information available.' }}
 
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
