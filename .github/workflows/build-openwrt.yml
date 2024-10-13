@@ -219,11 +219,18 @@ jobs:
           fi
 
       - name: Check configuration
+        env:
+          TERM: xterm-256color
         run: |
           cd openwrt
           make defconfig
-          make menuconfig
-          echo "Configuration check completed. Please review the .config file if needed."
+          ./scripts/diffconfig.sh > diffconfig
+          if [ -s diffconfig ]; then
+            cat diffconfig
+            echo "Config changes detected. Please review the changes above."
+          else
+            echo "No config changes detected."
+          fi
 
       - name: Compile the firmware
         id: compile
@@ -384,3 +391,13 @@ jobs:
           echo "DEVICE_NAME: ${{ env.DEVICE_NAME }}"
           echo "FILE_DATE: ${{ env.FILE_DATE }}"
           
+      - name: Check environment
+        run: |
+          echo "Checking required tools..."
+          for tool in git make gcc g++ unzip wget curl; do
+            if ! command -v $tool &> /dev/null; then
+              echo "$tool is not installed. Please add it to the workflow."
+              exit 1
+            fi
+          done
+          echo "All required tools are available."
