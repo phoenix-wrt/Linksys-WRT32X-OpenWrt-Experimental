@@ -1,414 +1,97 @@
 # File: .github/workflows/build-openwrt.yml
 ---
-# Inspired by P3TERX <https://p3terx.com>
-#
-# This file is part of Project Name and is released under the MIT License.
-# See the LICENSE file for more details.
-#
-# Description: This workflow automates the build process for OpenWrt firmware.
-#
-# Key features:
-# Source and Configuration:
-# - Customizable OpenWrt source and branch
-# - Support for custom feeds and configurations
-# - Flexible configuration via diy-part1.sh and diy-part2.sh scripts
-# - Pre-compilation configuration check with menuconfig
-#
-# Build Process Optimization:
-# - Multi-threaded compilation with dynamic thread allocation
-# - Caching of build dependencies for faster subsequent builds
-# - Use of ccache for optimized rebuilds
-# - Parallel package building
-# - Disk space optimization and cleanup
-# - Intelligent thread allocation based on available resources
-#
-# Custom Features:
-# - Automatic hosts file updating script
-# - Customizable cron job for periodic hosts updates (monthly by default)
-# - Support for custom patches and files
-#
-# Artifacts and Releases:
-# - Flexible artifact upload options (bin directory and firmware)
-# - Automatic firmware upload to GitHub releases
-# - Informative naming for artifacts and releases
-# - Automatic inclusion of recent OpenWrt changes in release notes
-# - Post-compilation firmware file check and listing
-#
-# Caching and Performance:
-# - Advanced caching of OpenWrt downloads, build directory, and toolchain
-# - Use of ccache for faster rebuilds with statistics reporting
-# - Optimization of compilation flags
-# - Safe and efficient cache cleanup using rsync
-#
-# Maintenance and Cleanup:
-# - Automatic cleanup of old workflow runs and releases
-# - Configurable retention of releases and pre-releases
-# - Intelligent disk space management and old cache cleanup
-# - Preservation of important cached data during cleanup
-#
-# Error Handling and Logging:
-# - Enhanced error handling in custom scripts
-# - Verbose logging options for debugging
-# - Post-build disk usage check
-# - Detailed compilation result checking and reporting
-#
-# Environment and Customization:
-# - Timezone configuration
-# - Customizable build environment variables
-# - Dynamic DEVICE_NAME detection with fallback option
-# - Detailed environment setup and configuration logging
-
 name: Build OpenWrt
 
 on:
-  repository_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
   REPO_BRANCH: main
-  FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
-  DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
   TZ: Europe/Kiev
-  KEEP_LATEST_RELEASES: 3
-  DELETE_ONLY_PRE_RELEASES: false
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Initialize environment
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo timedatectl set-timezone "$TZ"
-          sudo mkdir -p /workdir
-          sudo chown $USER:$GROUPS /workdir
+    - name: Initialize environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo timedatectl set-timezone "$TZ"
+        THREADS=$(nproc)
+        echo "BUILD_THREADS=$THREADS" >> $GITHUB_ENV
+        echo "Using $THREADS threads for compilation"
 
-          TOTAL_CORES=$(nproc)
-          TOTAL_MEMORY_MB=$(free -m | awk '/^Mem:/{print $2}')
-          MEMORY_PER_THREAD=2048  # Assume each thread needs 2GB RAM
-          THREADS_BY_MEMORY=$((TOTAL_MEMORY_MB / MEMORY_PER_THREAD))
-          OPTIMAL_THREADS=$((TOTAL_CORES < THREADS_BY_MEMORY ? TOTAL_CORES : THREADS_BY_MEMORY))
-          OPTIMAL_THREADS=$((OPTIMAL_THREADS > 1 ? OPTIMAL_THREADS : 1))
+    - name: Clone OpenWrt
+      run: |
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-          if [ $TOTAL_MEMORY_MB -lt 4096 ]; then
-            echo "Warning: Less than 4GB of RAM available. Build may fail or be very slow."
-          fi
+    - name: Load custom configuration
+      run: |
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
 
-          echo "BUILD_THREADS=$OPTIMAL_THREADS" >> $GITHUB_ENV
-          echo "Using $OPTIMAL_THREADS threads for compilation"
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+        max-size: 2G
 
-      - name: Clean up disk space
-        run: |
-          sudo apt-get autoremove -y && sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          if command -v docker &> /dev/null; then
-            docker rmi $(docker image ls -aq) || true
-          fi
-          if [ -d "/workdir" ]; then
-            sudo find /workdir -mindepth 1 -maxdepth 1 ! -name 'openwrt' -exec rm -rf {} +
-            if [ -d "/workdir/openwrt" ]; then
-              sudo find /workdir/openwrt -mindepth 1 -maxdepth 1 ! -name 'dl' ! -name 'build_dir' ! -name 'staging_dir' ! -name 'toolchain' -exec rm -rf {} +
-            else
-              echo "Warning: /workdir/openwrt directory not found"
-            fi
-          else
-            echo "Warning: /workdir directory not found"
-          fi
-          df -h
+    - name: Compile firmware
+      id: compile
+      run: |
+        cd openwrt
+        echo "CONFIG_CCACHE=y" >> .config
+        make defconfig
+        make download -j$BUILD_THREADS
+        make -j$BUILD_THREADS || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-      - name: Clone source code
-        working-directory: /workdir
-        run: |
-          git clone $REPO_URL -b $REPO_BRANCH --depth 1 openwrt
-          if [ ! -d "openwrt" ]; then
-            echo "Error: Failed to clone OpenWrt repository"
-            exit 1
-          fi
-          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+    - name: Organize files
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd openwrt/bin/targets/*/*
+        rm -rf packages
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
-      - name: Load custom feeds
-        run: |
-          if [ -e "$FEEDS_CONF" ]; then
-            echo "Moving custom feeds file"
-            mv "$FEEDS_CONF" openwrt/feeds.conf.default
-          else
-            echo "Custom feeds file not found, using default"
-          fi
-          if [ -f "$DIY_P1_SH" ]; then
-            chmod +x "$DIY_P1_SH"
-            cd openwrt
-            $GITHUB_WORKSPACE/$DIY_P1_SH
-          else
-            echo "Custom script $DIY_P1_SH not found, skipping"
-          fi
+    - name: Upload firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
 
-      - name: Generate cache key
-        id: cache_key
-        run: |
-          echo "cache_key=${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+    - name: Generate release tag
+      id: tag
+      run: |
+        echo "release_tag=$(date +"%Y.%m.%d")-${{ env.DEVICE_NAME }}" >> $GITHUB_OUTPUT
 
-      - name: Cache OpenWrt downloads and build
-        uses: actions/cache@v4
-        with:
-          path: |
-            openwrt/dl
-            openwrt/build_dir
-            openwrt/staging_dir
-            openwrt/toolchain
-          key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config') }}-
-            ${{ runner.os }}-openwrt-
+    - name: Create release
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        files: ${{ env.FIRMWARE }}/*
 
-      - name: Update feeds
-        run: cd openwrt && ./scripts/feeds update -a
-
-      - name: Install feeds
-        run: cd openwrt && ./scripts/feeds install -a
-
-      - name: Load custom configuration
-        run: |
-          if [ -e "files" ]; then
-            echo "Moving custom files"
-            mv files openwrt/files
-          else
-            echo "No custom files to move"
-          fi
-          if [ -e "$CONFIG_FILE" ]; then
-            echo "Moving custom config file"
-            mv "$CONFIG_FILE" openwrt/.config
-          else
-            echo "Custom config file not found, using default"
-          fi
-          if [ -f "$DIY_P2_SH" ]; then
-            chmod +x "$DIY_P2_SH"
-            cd openwrt
-            $GITHUB_WORKSPACE/$DIY_P2_SH
-          else
-            echo "Custom script $DIY_P2_SH not found, skipping"
-          fi
-
-      - name: Download package
-        id: package
-        run: |
-          cd openwrt
-          make defconfig
-          make download -j$BUILD_THREADS
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
-
-      - name: Check disk space before compilation
-        run: |
-          echo "Available disk space:"
-          df -h
-          FREE_SPACE=$(df -k --output=avail / | tail -n1)
-          if [ $FREE_SPACE -lt 10485760 ]; then  # 10GB in KB
-            echo "Error: Not enough disk space to proceed with compilation"
-            exit 1
-          fi
-
-      - name: Check configuration
-        env:
-          TERM: xterm-256color
-        run: |
-          cd openwrt
-          make defconfig
-          ./scripts/diffconfig.sh > diffconfig
-          if [ -s diffconfig ]; then
-            cat diffconfig
-            echo "Config changes detected. Please review the changes above."
-          else
-            echo "No config changes detected."
-          fi
-
-      - name: Compile the firmware
-        id: compile
-        run: |
-          cd openwrt
-          echo "Compiling with $BUILD_THREADS threads"
-          make -j$BUILD_THREADS || make -j1 V=s
-          echo "status=success" >> $GITHUB_OUTPUT
-          DEVICE_NAME=$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' | head -n 1)
-          if [ -n "$DEVICE_NAME" ]; then
-            echo "DEVICE_NAME detected: $DEVICE_NAME"
-            echo "DEVICE_NAME=_${DEVICE_NAME}" >> $GITHUB_ENV
-          else
-            echo "Warning: DEVICE_NAME not detected, using default value"
-            echo "DEVICE_NAME=_unknown" >> $GITHUB_ENV
-          fi
-          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-
-      - name: Check space usage
-        if: (!cancelled())
-        run: df -hT
-
-      - name: Upload bin directory
-        uses: actions/upload-artifact@v4
-        if: env.UPLOAD_BIN_DIR == 'true' && !cancelled()
-        with:
-          name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-          path: openwrt/bin
-
-      - name: Organize files
-        id: organize
-        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-        run: |
-          cd openwrt/bin/targets/*/*
-          rm -rf packages
-          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-          echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: Upload firmware directory
-        uses: actions/upload-artifact@v4
-        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-        with:
-          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-          path: ${{ env.FIRMWARE }}
-
-      - name: Get latest OpenWrt changes
-        id: openwrt_changes
-        run: |
-          echo "Fetching latest OpenWrt changes from GitHub API..."
-          changes=$(curl -s 'https://api.github.com/repos/openwrt/openwrt/commits?sha=${{ env.REPO_BRANCH }}' | 
-                    jq -r '.[:10] | map("- " + (.commit.author.date | .[0:10]) + ": " + (.commit.message | split("\n")[0])) | .[]')
-          
-          echo "Debug: Latest OpenWrt changes:"
-          echo "$changes"
-          
-          if [ -z "$changes" ]; then
-            echo "Warning: No changes fetched. Using placeholder message."
-            changes="Unable to fetch recent changes. Please check the OpenWrt repository for updates."
-          fi
-          
-          echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
-          echo "$changes" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Generate release tag
-        id: tag
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-        run: |
-          if [ -z "${{ env.FILE_DATE }}" ]; then
-            echo "Error: FILE_DATE is not set"
-            exit 1
-          fi
-          echo "release_tag=$(date +"%Y.%m.%d")${{ env.FILE_DATE }}" >> $GITHUB_OUTPUT
-          echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: Upload firmware to release
-        uses: softprops/action-gh-release@v2
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.tag.outputs.release_tag }}
-          files: ${{ env.FIRMWARE }}/*
-          body: |
-            This is an automated build of OpenWrt firmware for supported devices.
-            Built on: ${{ steps.tag.outputs.release_tag }}
-            
-            Device: ${{ env.DEVICE_NAME || 'Unknown' }}
-            
-            ${{ env.FIRMWARE != '' && 'Firmware can be found in the assets below.' || 'No firmware files were generated.' }}
-            
-            Recent OpenWrt changes:
-            ${{ steps.openwrt_changes.outputs.formatted_changes || 'No recent changes information available.' }}
-
-      - name: Delete old workflow runs
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          retain_days: 1
-          keep_minimum_runs: 1
-          delete_workflow_pattern: build-openwrt.yml
-          delete_run_by_conclusion_pattern: success,failure,cancelled
-
-      - name: Remove old Releases
-        uses: dev-drprasad/delete-older-releases@v0.3.3
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-        with:
-          keep_latest: ${{ env.KEEP_LATEST_RELEASES }}
-          delete_tags: true
-          delete_prerelease_only: ${{ env.DELETE_ONLY_PRE_RELEASES }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install ccache
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ccache
-
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          max-size: 2G
-          restore-keys: |
-            ${{ runner.os }}-${{ github.ref }}-
-            ${{ runner.os }}-
-
-      - name: Update ccache configuration
-        run: |
-          echo "CONFIG_CCACHE=y" >> openwrt/.config
-          echo "export CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-          echo "export CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "export CCACHE_COMPRESSLEVEL=5" >> $GITHUB_ENV
-          echo "export CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
-
-      - name: Display ccache statistics
-        if: always()
-        run: |
-          ccache -s
-
-      - name: Clean old caches
-        run: |
-          if [ -d "/workdir/openwrt" ]; then
-            mkdir -p /tmp/empty
-            if [ -d "/workdir/openwrt/dl" ]; then
-              rsync -a --delete --delete-excluded --prune-empty-dirs \
-                --include '*/' --include '*.xz' --include '*.gz' --include '*.zip' \
-                --exclude '*' --max-size=100M \
-                --modify-window=2592000 /tmp/empty/ /workdir/openwrt/dl/
-            fi
-            if [ -d "/workdir/openwrt/build_dir" ]; then
-              rsync -a --delete --delete-excluded --prune-empty-dirs \
-                --include '*/' --exclude '*' \
-                --modify-window=604800 /tmp/empty/ /workdir/openwrt/build_dir/
-            fi
-            rm -rf /tmp/empty
-          else
-            echo "Warning: /workdir/openwrt directory not found, skipping cache cleanup"
-          fi
-
-      - name: Check compilation result
-        if: steps.compile.outputs.status == 'success'
-        run: |
-          cd openwrt/bin/targets/*/*
-          echo "=== Firmware files ==="
-          ls -lh
-          echo "======================"
-          echo "DEVICE_NAME: ${{ env.DEVICE_NAME }}"
-          echo "FILE_DATE: ${{ env.FILE_DATE }}"
-          
-      - name: Check environment
-        run: |
-          echo "Checking required tools..."
-          for tool in git make gcc g++ unzip wget curl; do
-            if ! command -v $tool &> /dev/null; then
-              echo "$tool is not installed. Please add it to the workflow."
-              exit 1
-            fi
-          done
-          echo "All required tools are available."
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        retain_days: 1
+        keep_minimum_runs: 1
