@@ -1,5 +1,41 @@
 # File: .github/workflows/build-openwrt.yml
 ---
+# Inspired by P3TERX <https://p3terx.com>
+#
+# This file is part of Project Name and is released under the MIT License.
+# See the LICENSE file for more details.
+#
+# Description: This workflow automates the build process for OpenWrt firmware.
+#
+# Key features:
+# Source and Configuration:
+# - Customizable OpenWrt source repository and branch
+# - Support for custom configuration files and scripts
+#
+# Build Process:
+# - Automatic package downloads and multi-threaded compilation
+# - Ccache integration for faster subsequent builds
+# - Disk space optimization through selective file retention
+#
+# Artifacts and Releases:
+# - Automatic firmware upload as GitHub artifacts
+# - Creation of GitHub releases with descriptive naming
+# - Firmware files included in releases
+#
+# Workflow Optimization:
+# - Configurable timezone for accurate timestamps
+# - Dynamic thread count allocation based on available cores
+# - Automatic cleanup of old workflow runs and releases
+# - Configurable retention policy for releases
+#
+# Error Handling and Logging:
+# - Enhanced error handling in compilation process
+# - Detailed logging for troubleshooting
+#
+# Flexibility and Customization:
+# - Support for manual workflow triggering
+# - Easy customization of build parameters through environment variables
+
 name: Build OpenWrt
 
 on:
@@ -15,10 +51,12 @@ env:
   CONFIG_FILE: .config
   DIY_P2_SH: diy-part2.sh
   TZ: Europe/Kiev
+  UPLOAD_RELEASE: true
+  KEEP_LATEST_RELEASES: 3
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
     - name: Checkout
@@ -89,6 +127,15 @@ jobs:
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         files: ${{ env.FIRMWARE }}/*
+
+    - name: Remove old Releases
+      uses: dev-drprasad/delete-older-releases@v0.3.3
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: ${{ env.KEEP_LATEST_RELEASES }}
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
