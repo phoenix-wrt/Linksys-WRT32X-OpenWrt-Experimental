@@ -345,16 +345,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install ccache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
           max-size: 2G
+          restore-keys: |
+            ${{ runner.os }}-${{ github.ref }}-
+            ${{ runner.os }}-
 
       - name: Update ccache configuration
         run: |
           echo "CONFIG_CCACHE=y" >> openwrt/.config
           echo "export CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          echo "export CCACHE_COMPRESS=1" >> $GITHUB_ENV
+          echo "export CCACHE_COMPRESSLEVEL=5" >> $GITHUB_ENV
+          echo "export CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
 
       - name: Display ccache statistics
         if: always()
