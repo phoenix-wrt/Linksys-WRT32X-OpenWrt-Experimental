@@ -50,13 +50,14 @@ jobs:
           cd openwrt
           $GITHUB_WORKSPACE/$DIY_SCRIPT
 
-      - name: Setup ccache for faster builds
-        uses: actions/cache@v3
-        with:
-          path: ~/.ccache
-          key: ccache-${{ runner.os }}-${{ github.ref }}
-          restore-keys: |
-            ccache-${{ runner.os }}-
+- name: Setup ccache
+  uses: actions/cache@v3
+  with:
+    path: ~/.ccache
+    key: ${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+    restore-keys: |
+      ${{ runner.os }}-${{ github.ref }}-
+      ${{ runner.os }}-
 
       - name: Build OpenWrt firmware
         id: build
