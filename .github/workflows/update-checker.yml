@@ -62,7 +62,7 @@ jobs:
 
       - name: Trigger build
         if: steps.compareCommit.outputs.changed == 'true'
-        uses: peter-evans/repository-dispatch@v1
+        uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: Source Code Update
