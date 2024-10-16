@@ -9,7 +9,8 @@
 #
 # Key features:
 # Source and Configuration:
-# - Customizable OpenWrt source and branch
+# - Automatic detection and use of the latest stable OpenWrt version
+# - Customizable OpenWrt source
 # - Support for custom feeds and configurations
 # - Flexible configuration via diy-part1.sh and diy-part2.sh scripts
 # - Pre-compilation configuration check with menuconfig
@@ -30,8 +31,8 @@
 # Artifacts and Releases:
 # - Flexible artifact upload options (bin directory and firmware)
 # - Automatic firmware upload to GitHub releases
-# - Informative naming for artifacts and releases
-# - Automatic inclusion of recent OpenWrt changes in release notes
+# - Informative naming for artifacts and releases including OpenWrt version
+# - Automatic inclusion of recent OpenWrt changes from the stable branch in release notes
 # - Post-compilation firmware file check and listing
 # - Configurable number of releases to keep
 #
@@ -71,7 +72,6 @@ on:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
-  REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
@@ -89,6 +89,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Determine latest stable OpenWrt version
+        id: openwrt_version
+        run: |
+          echo "Fetching latest stable OpenWrt version..."
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/openwrt/openwrt/releases | jq -r '[.[] | select(.prerelease == false)][0].tag_name')
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "Failed to determine latest stable version. Defaulting to openwrt-23.05"
+            LATEST_VERSION="openwrt-23.05"
+          fi
+          echo "Latest stable OpenWrt version: $LATEST_VERSION"
+          echo "REPO_BRANCH=$LATEST_VERSION" >> $GITHUB_ENV
+          echo "repo_branch=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Clone source code
+        working-directory: /workdir
+        run: |
+          echo "Cloning OpenWrt repository branch: ${{ env.REPO_BRANCH }}"
+          git clone $REPO_URL -b $REPO_BRANCH --depth 1 openwrt
+          if [ ! -d "openwrt" ]; then
+            echo "Error: Failed to clone OpenWrt repository"
+            exit 1
+          fi
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
       - name: Initialize environment
         env:
@@ -131,16 +155,6 @@ jobs:
             echo "Warning: /workdir directory not found"
           fi
           df -h
-
-      - name: Clone source code
-        working-directory: /workdir
-        run: |
-          git clone $REPO_URL -b $REPO_BRANCH --depth 1 openwrt
-          if [ ! -d "openwrt" ]; then
-            echo "Error: Failed to clone OpenWrt repository"
-            exit 1
-          fi
-          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
       - name: Load custom feeds
         run: |
@@ -308,7 +322,7 @@ jobs:
             echo "Error: FILE_DATE is not set"
             exit 1
           fi
-          echo "release_tag=$(date +"%Y.%m.%d")${{ env.FILE_DATE }}" >> $GITHUB_OUTPUT
+          echo "release_tag=${{ steps.openwrt_version.outputs.repo_branch }}-$(date +"%Y.%m.%d")${{ env.FILE_DATE }}" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release
@@ -417,4 +431,3 @@ jobs:
             fi
           done
           echo "All required tools are available."
-          
