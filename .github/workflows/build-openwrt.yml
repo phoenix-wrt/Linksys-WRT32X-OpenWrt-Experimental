@@ -110,16 +110,15 @@ jobs:
           echo "REPO_BRANCH=$LATEST_VERSION" >> $GITHUB_ENV
           echo "repo_branch=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Generate cache key
-        id: cache_key
-        run: |
-          echo "key=${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+      - name: Generate date for cache key
+        id: date
+        run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
       - name: Cache OpenWrt downloads
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: ${{ steps.cache_key.outputs.key }}-downloads
+          key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-${{ steps.date.outputs.date }}-downloads
           restore-keys: |
             ${{ runner.os }}-openwrt-downloads-
 
