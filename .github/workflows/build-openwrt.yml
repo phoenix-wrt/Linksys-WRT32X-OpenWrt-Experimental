@@ -113,13 +113,13 @@ jobs:
       - name: Generate cache key
         id: cache_key
         run: |
-          echo "cache_key=${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "key=${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
 
       - name: Cache OpenWrt downloads
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: ${{ steps.cache_key.outputs.cache_key }}-downloads
+          key: ${{ steps.cache_key.outputs.key }}-downloads
           restore-keys: |
             ${{ runner.os }}-openwrt-downloads-
 
@@ -236,7 +236,7 @@ jobs:
       - name: Generate cache key
         id: cache_key
         run: |
-          echo "cache_key=${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "key=${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config', 'feeds.conf.default') }}-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
 
       - name: Cache OpenWrt downloads and build
         uses: actions/cache@v4
@@ -246,7 +246,7 @@ jobs:
             openwrt/build_dir
             openwrt/staging_dir
             openwrt/toolchain
-          key: ${{ steps.cache_key.outputs.cache_key }}
+          key: ${{ steps.cache_key.outputs.key }}
           restore-keys: |
             ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/.config') }}-
             ${{ runner.os }}-openwrt-
