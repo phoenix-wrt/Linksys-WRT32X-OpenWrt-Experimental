@@ -41,7 +41,19 @@ LAST_DATE_FILE="/etc/last_update_date"
 TMP_FILE="/tmp/hosts_tmp"
 BAK_FILE="/tmp/hosts.bak"
 
-if ! curl -sSfL "$CHECK_URL" -o "$TMP_FILE"; then
+# Function to download the file
+download_file() {
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -O "$1" "$2"
+    elif command -v uclient-fetch >/dev/null 2>&1; then
+        uclient-fetch -q -O "$1" "$2"
+    else
+        echo "Error: Neither wget nor uclient-fetch is available" >&2
+        exit 1
+    fi
+}
+
+if ! download_file "$TMP_FILE" "$CHECK_URL"; then
     echo "Failed to download hosts file" >&2
     exit 1
 fi
