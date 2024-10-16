@@ -8,14 +8,18 @@
 # Description: This workflow checks for updates in the OpenWrt repository and triggers a build if changes are detected.
 #
 # Key features:
-# - Checks for updates in the OpenWrt repository
-# - Triggers a build if changes are detected
-# - Deletes old workflow runs to optimize disk space
+# - Automatically detects the latest stable OpenWrt version
+# - Checks for updates in the stable branch of the OpenWrt repository
+# - Triggers a build if changes are detected in the stable branch
+# - Saves and compares commit information to detect changes
+# - Runs on a schedule or can be manually triggered
+# - Deletes old workflow runs to optimize GitHub Actions storage
+# - Uses GitHub API to fetch repository information
+# - Provides detailed output for debugging and monitoring
 
 name: Update Checker
 env:
-  REPO_URL: https://git.openwrt.org/openwrt/openwrt.git
-  REPO_BRANCH: main
+  REPO_URL: https://github.com/openwrt/openwrt.git
 
 on:
   workflow_dispatch:
@@ -27,10 +31,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Get Latest Stable OpenWrt Version
+        id: getStableVersion
+        run: |
+          STABLE_VERSION=$(curl -s https://api.github.com/repos/openwrt/openwrt/releases | jq -r '[.[] | select(.prerelease == false)][0].tag_name')
+          if [ -z "$STABLE_VERSION" ]; then
+            echo "Failed to determine latest stable version. Defaulting to openwrt-23.05"
+            STABLE_VERSION="openwrt-23.05"
+          fi
+          echo "stableVersion=$STABLE_VERSION" >> $GITHUB_OUTPUT
+
       - name: Get Latest Commit Info
         id: getCommitInfo
         run: |
-          COMMIT_INFO=$(curl -s "https://api.github.com/repos/openwrt/openwrt/branches/$REPO_BRANCH")
+          COMMIT_INFO=$(curl -s "https://api.github.com/repos/openwrt/openwrt/branches/${{ steps.getStableVersion.outputs.stableVersion }}")
           COMMIT_HASH=$(echo $COMMIT_INFO | jq -r .commit.sha)
           COMMIT_DATE=$(echo $COMMIT_INFO | jq -r .commit.commit.committer.date)
           echo "commitHash=$COMMIT_HASH" >> $GITHUB_OUTPUT
@@ -43,10 +57,10 @@ jobs:
             LAST_HASH=$(cat .lastCommitInfo | head -n 1)
             LAST_DATE=$(cat .lastCommitInfo | tail -n 1)
             if [ "$LAST_HASH" != "${{ steps.getCommitInfo.outputs.commitHash }}" ] && [ "$LAST_DATE" != "${{ steps.getCommitInfo.outputs.commitDate }}" ]; then
-              echo "Changes detected"
+              echo "Changes detected in stable branch"
               echo "changed=true" >> $GITHUB_OUTPUT
             else
-              echo "No changes detected"
+              echo "No changes detected in stable branch"
               echo "changed=false" >> $GITHUB_OUTPUT
             fi
           else
