@@ -104,7 +104,6 @@ jobs:
           echo "repo_branch=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: Clone source code
-        working-directory: /workdir
         run: |
           echo "Cloning OpenWrt repository branch: ${{ env.REPO_BRANCH }}"
           git clone $REPO_URL -b $REPO_BRANCH --depth 1 openwrt
@@ -112,7 +111,7 @@ jobs:
             echo "Error: Failed to clone OpenWrt repository"
             exit 1
           fi
-          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+          ln -sf $GITHUB_WORKSPACE/openwrt $GITHUB_WORKSPACE/openwrt
 
       - name: Initialize environment
         env:
@@ -158,19 +157,10 @@ jobs:
 
       - name: Load custom feeds
         run: |
-          if [ -e "$FEEDS_CONF" ]; then
-            echo "Moving custom feeds file"
-            mv "$FEEDS_CONF" openwrt/feeds.conf.default
-          else
-            echo "Custom feeds file not found, using default"
-          fi
-          if [ -f "$DIY_P1_SH" ]; then
-            chmod +x "$DIY_P1_SH"
-            cd openwrt
-            $GITHUB_WORKSPACE/$DIY_P1_SH
-          else
-            echo "Custom script $DIY_P1_SH not found, skipping"
-          fi
+          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+          chmod +x $DIY_P1_SH
+          cd openwrt
+          $GITHUB_WORKSPACE/$DIY_P1_SH
 
       - name: Generate cache key
         id: cache_key
