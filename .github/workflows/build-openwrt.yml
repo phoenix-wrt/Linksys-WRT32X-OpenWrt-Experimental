@@ -358,10 +358,6 @@ jobs:
         id: tag
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         run: |
-          if [ -z "${{ env.FILE_DATE }}" ]; then
-            echo "Error: FILE_DATE is not set"
-            exit 1
-          fi
           echo "release_tag=${{ steps.openwrt_version.outputs.repo_branch }}-$(date +"%Y.%m.%d")${{ env.FILE_DATE }}" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
 
