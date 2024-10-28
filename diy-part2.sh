@@ -24,6 +24,10 @@ mkdir -p files/etc/dnsmasq.conf.d
 
 # 3. Setup hosts file and scripts
 #----------------------------------------
+cat << 'EOF' > files/etc/crontabs/root
+0 4 * * * /usr/bin/update_hosts.sh
+EOF
+
 cat << 'EOF' > files/usr/bin/update_hosts.sh
 #!/bin/sh
 set -e
