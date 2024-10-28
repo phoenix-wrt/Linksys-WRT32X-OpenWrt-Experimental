@@ -1,180 +1,148 @@
 #!/bin/bash
-#
-# This file is part of the OpenWrt build process and is called after
-# the configuration is loaded.
 
 # 1. Basic compilation settings
 #----------------------------------------
-# Enable and configure ccache
 echo "CONFIG_CCACHE=y" >> .config
 echo "CONFIG_CCACHE_DIR=$HOME/.ccache" >> .config
-
-# Optimize ccache
 echo "export CCACHE_COMPRESS=1" >> $GITHUB_ENV
 echo "export CCACHE_COMPRESSLEVEL=5" >> $GITHUB_ENV
 echo "export CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
-
-# Enable parallel build for packages
 echo "CONFIG_PKG_BUILD_JOBS=$BUILD_THREADS" >> .config
 echo "CONFIG_PKG_BUILD_PARALLEL=y" >> .config
-
-# Optimize for faster compilation
 echo "CONFIG_DEVEL=y" >> .config
 echo "CONFIG_BUILD_LOG=y" >> .config
 echo "CONFIG_CCACHE=y" >> .config
 echo "CONFIG_TOOLCHAINOPTS=y" >> .config
 echo "CONFIG_GCC_USE_VERSION_9=y" >> .config
 
-# 2. Create file structure and directories
+# 2. Create directories
 #----------------------------------------
-# Create necessary directories
 mkdir -p files/usr/bin
 mkdir -p files/etc/init.d
 mkdir -p files/etc/crontabs
 mkdir -p files/etc/dnsmasq.conf.d
 
-# 3. Setup hosts file and related scripts
+# 3. Setup hosts file and scripts
 #----------------------------------------
-# Create update_hosts.sh script
 cat << 'EOF' > files/usr/bin/update_hosts.sh
 #!/bin/sh
 set -e
 
 CHECK_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts"
-HOSTS_FILE="/tmp/hosts"
+HOSTS_FILE="/tmp/hosts.block"
 LAST_DATE_FILE="/tmp/last_update_date"
 TMP_FILE="/tmp/hosts_tmp"
 BAK_FILE="/tmp/hosts.bak"
 BOOT_FLAG="/tmp/first_boot"
 
-# Function to download the file
 download_file() {
     if command -v wget >/dev/null 2>&1; then
-        wget -q -O "$1" "$2"
+        wget --no-check-certificate -q -O "$1" "$2"
+        return $?
     elif command -v uclient-fetch >/dev/null 2>&1; then
         uclient-fetch -q -O "$1" "$2"
-    else
-        echo "Error: Neither wget nor uclient-fetch is available" >&2
-        exit 1
+        return $?
     fi
+    return 1
 }
 
-# Check if this is first boot
-if [ ! -f "$BOOT_FLAG" ]; then
-    # First boot after restart - download fresh file
-    touch "$BOOT_FLAG"
-    if ! download_file "$HOSTS_FILE" "$CHECK_URL"; then
-        echo "Failed to download hosts file" >&2
-        exit 1
-    fi
-    
-    # Check if the downloaded file is valid
-    if [ ! -s "$HOSTS_FILE" ] || ! grep -q "^# Title: StevenBlack/hosts" "$HOSTS_FILE"; then
-        echo "Downloaded file is empty or has unexpected format" >&2
-        rm -f "$HOSTS_FILE"
-        exit 1
-    fi
+rm -f "$HOSTS_FILE" "$TMP_FILE" "$LAST_DATE_FILE" "$BAK_FILE"
 
-    # Extract and save the date
-    sed -n 's/^# Date: //p' "$HOSTS_FILE" > "$LAST_DATE_FILE"
-    
-    # Restart dnsmasq
-    if ! /etc/init.d/dnsmasq restart; then
-        echo "Failed to restart dnsmasq" >&2
-        rm -f "$HOSTS_FILE"
-        exit 1
-    fi
-    
-    echo "Initial hosts file downloaded successfully"
-    exit 0
+if ! touch /tmp/test_write; then
+    exit 1
 fi
+rm -f /tmp/test_write
 
-# Normal update check during runtime
 if ! download_file "$TMP_FILE" "$CHECK_URL"; then
-    echo "Failed to download hosts file" >&2
     exit 1
 fi
 
-# Check if the downloaded file is not empty and has the expected format
 if [ ! -s "$TMP_FILE" ] || ! grep -q "^# Title: StevenBlack/hosts" "$TMP_FILE"; then
-    echo "Downloaded file is empty or has unexpected format" >&2
     rm -f "$TMP_FILE"
     exit 1
 fi
 
-NEW_DATE=$(sed -n 's/^# Date: //p' "$TMP_FILE")
-[ -f "$LAST_DATE_FILE" ] && LAST_DATE=$(cat "$LAST_DATE_FILE") || LAST_DATE=""
+if ! mv "$TMP_FILE" "$HOSTS_FILE"; then
+    exit 1
+fi
 
-if [ "$NEW_DATE" != "$LAST_DATE" ]; then
-    # Backup the old hosts file
-    cp "$HOSTS_FILE" "$BAK_FILE"
+if [ ! -f "$HOSTS_FILE" ]; then
+    exit 1
+fi
 
-    # Update the hosts file
-    mv "$TMP_FILE" "$HOSTS_FILE"
-    echo "$NEW_DATE" > "$LAST_DATE_FILE"
+sed -n 's/^# Date: //p' "$HOSTS_FILE" > "$LAST_DATE_FILE"
+touch "$BOOT_FLAG"
 
-    # Restart dnsmasq
-    if ! /etc/init.d/dnsmasq restart; then
-        echo "Failed to restart dnsmasq. Reverting changes." >&2
-        mv "$BAK_FILE" "$HOSTS_FILE"
-        rm -f "$LAST_DATE_FILE"
-        exit 1
-    fi
-
-    echo "Hosts file updated successfully"
-    rm -f "$BAK_FILE"
-else
-    rm -f "$TMP_FILE"
-    echo "Hosts file is already up to date"
+if ! /etc/init.d/dnsmasq restart; then
+    rm -f "$HOSTS_FILE"
+    exit 1
 fi
 EOF
 
-# Create init script
+cat << 'EOF' > files/etc/dnsmasq.conf.d/hosts.conf
+addn-hosts=/tmp/hosts.block
+domain-needed
+bogus-priv
+no-resolv
+server=8.8.8.8
+server=8.8.4.4
+EOF
+
 cat << 'EOF' > files/etc/init.d/hosts-init
 #!/bin/sh /etc/rc.common
 
-START=19
-STOP=90
+START=99
+STOP=10
+USE_PROCD=1
 
-start() {
-    rm -f /tmp/first_boot
-    /usr/bin/update_hosts.sh
+start_service() {
+    chmod 755 /usr/bin/update_hosts.sh
+    chmod 755 /etc/hotplug.d/iface/99-update-hosts
+    mkdir -p /etc/dnsmasq.conf.d
+    echo "addn-hosts=/tmp/hosts.block" > /etc/dnsmasq.conf.d/hosts.conf
 }
 
-stop() {
-    rm -f /tmp/hosts
+stop_service() {
+    rm -f /tmp/hosts.block
     rm -f /tmp/last_update_date
     rm -f /tmp/first_boot
 }
+
+service_triggers() {
+    procd_add_reload_trigger "network"
+}
 EOF
 
-# Set permissions
-chmod +x files/etc/init.d/hosts-init
-chmod +x files/usr/bin/update_hosts.sh
+mkdir -p files/etc/hotplug.d/iface
+cat << 'EOF' > files/etc/hotplug.d/iface/99-update-hosts
+#!/bin/sh
 
-# Create dnsmasq config
-cat << 'EOF' > files/etc/dnsmasq.conf.d/hosts.conf
-addn-hosts=/tmp/hosts
+[ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "wan" ] && {
+    for i in $(seq 1 10); do
+        if [ -f "/tmp/resolv.conf" ] && grep -q "nameserver" "/tmp/resolv.conf"; then
+            break
+        fi
+        sleep 2
+    done
+    
+    for i in $(seq 1 5); do
+        if ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
+            if [ ! -x /usr/bin/update_hosts.sh ]; then
+                chmod 755 /usr/bin/update_hosts.sh
+            fi
+            /usr/bin/update_hosts.sh
+            exit 0
+        fi
+        sleep 5
+    done
+}
 EOF
 
-# Add cron job for daily updates
-echo "0 4 * * * /usr/bin/update_hosts.sh" >> files/etc/crontabs/root
+chmod 755 files/usr/bin/update_hosts.sh
+chmod 755 files/etc/init.d/hosts-init
+chmod 755 files/etc/hotplug.d/iface/99-update-hosts
 
-# 4. System parameters configuration
+# 4. System configuration
 #----------------------------------------
-# Customize default IP address
-sed -i 's/192.168.1.1/192.168.1.2/g' package/base-files/files/bin/config_generate
-
-# Customize hostname
 sed -i 's/OpenWrt/Linksys02023/g' package/base-files/files/bin/config_generate
-
-# Enable WiFi by default
-sed -i 's/option disabled 1/option disabled 0/g' package/kernel/mac80211/files/lib/wifi/mac80211.sh
-
-# Set timezone
 sed -i "s/timezone='UTC'/timezone='Europe\/Kiev'/g" package/base-files/files/bin/config_generate
-
-# 5. Debug information
-#----------------------------------------
-# Print disk usage for debugging
-df -h
