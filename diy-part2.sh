@@ -121,16 +121,16 @@ mkdir -p files/etc/hotplug.d/iface
 cat << 'EOF' > files/etc/hotplug.d/iface/99-update-hosts
 #!/bin/sh
 
-[ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "wan" ] && {
+[ "$ACTION" = "ifup" ] && {
     for i in $(seq 1 10); do
         if [ -f "/tmp/resolv.conf" ] && grep -q "nameserver" "/tmp/resolv.conf"; then
             break
         fi
         sleep 2
     done
-    
+
     for i in $(seq 1 5); do
-        if ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
+        if ip route | grep -q default && ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
             if [ ! -x /usr/bin/update_hosts.sh ]; then
                 chmod 755 /usr/bin/update_hosts.sh
             fi
