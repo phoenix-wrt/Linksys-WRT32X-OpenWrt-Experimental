@@ -23,8 +23,8 @@ name: Build OpenWrt
   workflow_dispatch:
     inputs:
       openwrt_version:
-        default: 24.10.0-rc4
-        description: 'Specify OpenWrt version (e.g., 23.05.0 or 24.10.0-rc4)'
+        default: v24.10.0-rc4
+        description: 'Specify OpenWrt version (e.g., v23.05.0 or v24.10.0-rc4)'
         required: false
 env:
   REPO_URL: 'https://github.com/openwrt/openwrt.git'
@@ -49,24 +49,13 @@ jobs:
         run: |
           if [[ -n "${{ github.event.inputs.openwrt_version }}" ]]; then
             echo "Using manually specified OpenWrt version: ${{ github.event.inputs.openwrt_version }}"
-            if [[ ! ${{ github.event.inputs.openwrt_version }} =~ ^.*\.[0-9]+$ ]]; then
-              VERSION="${{ github.event.inputs.openwrt_version }}.0"
-            else
-              VERSION="${{ github.event.inputs.openwrt_version }}"
-            fi
-            if [[ $VERSION == openwrt-* ]]; then
-              VERSION="$VERSION"
-            else
-              VERSION="openwrt-$VERSION"
-            fi
+            VERSION="${{ github.event.inputs.openwrt_version }}"
           else
             echo "Fetching latest stable OpenWrt version..."
-            VERSION=$(curl -s https://api.github.com/repos/openwrt/openwrt/releases | jq -r '[.[] | select(.prerelease == false)][0].tag_name' | sed 's/^v//')
+            VERSION=$(curl -s https://api.github.com/repos/openwrt/openwrt/releases | jq -r '[.[] | select(.prerelease == false)][0].tag_name')
             if [ -z "$VERSION" ]; then
-              echo "Failed to determine latest stable version. Defaulting to openwrt-23.05.0"
-              VERSION="openwrt-23.05.0"
-            else
-              VERSION="openwrt-$VERSION"
+              echo "Failed to determine latest stable version. Defaulting to v23.05.0"
+              VERSION="v23.05.0"
             fi
           fi
           echo "Using OpenWrt version: $VERSION"
@@ -278,3 +267,4 @@ jobs:
             fi
           done
           echo "All required tools are available."
+
