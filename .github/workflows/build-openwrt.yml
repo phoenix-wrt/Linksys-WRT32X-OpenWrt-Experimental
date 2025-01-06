@@ -23,8 +23,8 @@ name: Build OpenWrt
   workflow_dispatch:
     inputs:
       openwrt_version:
-        default: v23.05.5
-        description: 'Specify OpenWrt version (e.g., v23.05.0 or v24.10.0-rc4)'
+        default: 24.10.0-rc4
+        description: 'Specify OpenWrt version (e.g., 23.05.0 or 24.10.0-rc4)'
         required: false
 env:
   REPO_URL: 'https://github.com/openwrt/openwrt.git'
@@ -49,7 +49,7 @@ jobs:
         run: |
           if [[ -n "${{ github.event.inputs.openwrt_version }}" ]]; then
             echo "Using manually specified OpenWrt version: ${{ github.event.inputs.openwrt_version }}"
-            VERSION="${{ github.event.inputs.openwrt_version }}"
+            VERSION="v${{ github.event.inputs.openwrt_version }}"
           else
             echo "Fetching latest stable OpenWrt version..."
             VERSION=$(curl -s https://api.github.com/repos/openwrt/openwrt/releases | jq -r '[.[] | select(.prerelease == false)][0].tag_name')
@@ -267,4 +267,3 @@ jobs:
             fi
           done
           echo "All required tools are available."
-
