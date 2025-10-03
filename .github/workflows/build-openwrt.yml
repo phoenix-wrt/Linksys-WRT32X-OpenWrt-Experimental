@@ -23,7 +23,7 @@ name: Build OpenWrt
   workflow_dispatch:
     inputs:
       openwrt_version:
-        default: 24.10.2
+        default: 24.10.3
         description: 'Specify OpenWrt version (e.g., 23.05.0 or 24.10.0-rc4)'
         required: false
 env:
