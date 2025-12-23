@@ -96,8 +96,28 @@ jobs:
           chmod +x $DIY_P1_SH
           cd openwrt
           $GITHUB_WORKSPACE/$DIY_P1_SH
-      - name: Update feeds
-        run: cd openwrt && ./scripts/feeds update -a
+      - name: Force GitHub feeds mirrors
+        run: |
+          cat > openwrt/feeds.conf.default <<'EOF'
+          src-git packages https://github.com/openwrt/packages.git
+          src-git luci https://github.com/openwrt/luci.git
+          src-git routing https://github.com/openwrt/routing.git
+          src-git telephony https://github.com/openwrt/telephony.git
+          EOF
+          echo "feeds.conf.default rewritten to use GitHub mirrors"
+          cat openwrt/feeds.conf.default
+      - name: Update feeds (with retry & fallback)
+        run: |
+          cd openwrt
+          for i in 1 2 3; do
+            echo "Feeds update attempt $i..."
+            ./scripts/feeds update -a && break
+            sleep 10
+          done
+          if [ $? -ne 0 ]; then
+            echo "Feeds update failed after retries"
+            exit 1
+          fi
       - name: Install feeds
         run: cd openwrt && ./scripts/feeds install -a
       - name: Load custom configuration
