@@ -1,24 +1,22 @@
 name: Build OpenWrt
-on:
-  repository_dispatch:
+'on':
+  repository_dispatch: null
   workflow_dispatch:
     inputs:
       openwrt_version:
-        description: 'Specify OpenWrt version (e.g. 23.05.5 or 24.10.5)'
+        description: Specify OpenWrt version (e.g. 23.05.5 or 24.10.5)
         required: false
         default: 24.10.5
 env:
-  REPO_URL: https://github.com/openwrt/openwrt.git
+  REPO_URL: 'https://github.com/openwrt/openwrt.git'
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   TZ: Europe/Kiev
-
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: false
-
   KEEP_LATEST_RELEASES: 3
   DELETE_ONLY_PRE_RELEASES: false
 jobs:
@@ -63,14 +61,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: openwrt-dl-${{ env.REPO_BRANCH }}
+          key: 'openwrt-dl-${{ env.REPO_BRANCH }}'
           restore-keys: |
             openwrt-dl-
       - name: Cache OpenWrt staging_dir
         uses: actions/cache@v4
         with:
           path: openwrt/staging_dir
-          key: openwrt-staging-${{ env.REPO_BRANCH }}
+          key: 'openwrt-staging-${{ env.REPO_BRANCH }}'
           restore-keys: |
             openwrt-staging-
       - name: Load custom feeds script
@@ -87,7 +85,6 @@ jobs:
           src-git routing https://github.com/openwrt/routing.git
           src-git telephony https://github.com/openwrt/telephony.git
           EOF
-
           cat openwrt/feeds.conf.default
       - name: Update feeds (retry)
         run: |
@@ -104,7 +101,6 @@ jobs:
         run: |
           [ -d files ] && mv files openwrt/files
           [ -f "$CONFIG_FILE" ] && mv "$CONFIG_FILE" openwrt/.config
-
           if [ -f "$DIY_P2_SH" ]; then
             chmod +x "$DIY_P2_SH"
             cd openwrt
@@ -118,15 +114,18 @@ jobs:
           find dl -size -1024c -delete
       - name: Compile firmware
         id: compile
-        run: |
+        run: >
           cd openwrt
+
           make -j$(nproc) || make -j1 V=s
 
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config \
             | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >>
+          $GITHUB_ENV
 
-          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
           echo "FILE_DATE=_$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
+
           echo "status=success" >> $GITHUB_OUTPUT
       - name: Organize firmware files
         if: env.UPLOAD_FIRMWARE == 'true'
@@ -138,11 +137,11 @@ jobs:
         if: env.UPLOAD_FIRMWARE == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: OpenWrt${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-          path: ${{ env.FIRMWARE }}
+          name: 'OpenWrt${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}'
+          path: '${{ env.FIRMWARE }}'
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: '${{ secrets.GITHUB_TOKEN }}'
           retain_days: 1
           keep_minimum_runs: 1
