@@ -1,41 +1,24 @@
-# File: .github/workflows/build-openwrt.yml
----
-# Inspired by P3TERX <https://p3terx.com>
-#
-# This file is part of Project Name and is released under the MIT License.
-# See the LICENSE file for more details.
-#
-# Description: This workflow automates the build process for OpenWrt firmware.
-#
-# Key features:
-# - Automated build process for OpenWrt firmware
-# - Dynamic detection of the latest stable OpenWrt version
-# - Customizable configuration and script support
-# - Efficient use of GitHub Actions resources
-# - Automatic cleanup of old workflow runs and releases
-# - Comprehensive error handling and logging
-# - Integration with GitHub releases for easy firmware distribution
-# - Inclusion of recent OpenWrt changes in release notes
-
 name: Build OpenWrt
-'on':
-  repository_dispatch: null
+on:
+  repository_dispatch:
   workflow_dispatch:
     inputs:
       openwrt_version:
-        default: 24.10.5
-        description: 'Specify OpenWrt version (e.g., 23.05.0 or 24.10.0-rc4)'
+        description: 'Specify OpenWrt version (e.g. 23.05.5 or 24.10.5)'
         required: false
+        default: 24.10.5
 env:
-  REPO_URL: 'https://github.com/openwrt/openwrt.git'
+  REPO_URL: https://github.com/openwrt/openwrt.git
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
+  TZ: Europe/Kiev
+
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: false
-  TZ: Europe/Kiev
+
   KEEP_LATEST_RELEASES: 3
   DELETE_ONLY_PRE_RELEASES: false
 jobs:
@@ -48,50 +31,54 @@ jobs:
         id: openwrt_version
         run: |
           if [[ -n "${{ github.event.inputs.openwrt_version }}" ]]; then
-            echo "Using manually specified OpenWrt version: ${{ github.event.inputs.openwrt_version }}"
             VERSION="v${{ github.event.inputs.openwrt_version }}"
           else
-            echo "Fetching latest stable OpenWrt version..."
-            VERSION=$(curl -s https://api.github.com/repos/openwrt/openwrt/releases | jq -r '[.[] | select(.prerelease == false)][0].tag_name')
-            if [ -z "$VERSION" ]; then
-              echo "Failed to determine latest stable version. Defaulting to v23.05.0"
-              VERSION="v23.05.0"
-            fi
+            VERSION=$(curl -s https://api.github.com/repos/openwrt/openwrt/releases \
+              | jq -r '[.[] | select(.prerelease == false)][0].tag_name')
+            [ -z "$VERSION" ] && VERSION="v23.05.5"
           fi
           echo "Using OpenWrt version: $VERSION"
           echo "REPO_BRANCH=$VERSION" >> $GITHUB_ENV
-      - name: Clone source code
+          echo "repo_branch=$VERSION" >> $GITHUB_OUTPUT
+      - name: Clone OpenWrt source
         run: |
-          echo "Cloning OpenWrt repository branch: ${{ env.REPO_BRANCH }}"
-          git clone $REPO_URL -b $REPO_BRANCH --depth 1 openwrt
-          if [ ! -d "openwrt" ]; then
-            echo "Error: Failed to clone OpenWrt repository"
-            exit 1
-          fi
-          ln -sf $GITHUB_WORKSPACE/openwrt $GITHUB_WORKSPACE/openwrt
+          git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" openwrt
       - name: Initialize environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo timedatectl set-timezone "$TZ"
-          sudo mkdir -p /workdir
-          sudo chown $USER:$GROUPS /workdir
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-setuptools rsync unzip zlib1g-dev file wget curl jq
       - name: Clean up disk space
-        run: >
-          sudo apt-get autoremove -y && sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          /opt/hostedtoolcache/CodeQL
-          if command -v docker &> /dev/null; then
-            docker rmi $(docker image ls -aq) || true
-          fi
-          df -h
-      - name: Load custom feeds
         run: |
-          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-          chmod +x $DIY_P1_SH
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL
+          df -h
+      - name: Cache OpenWrt downloads
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: openwrt-dl-${{ env.REPO_BRANCH }}
+          restore-keys: |
+            openwrt-dl-
+      - name: Cache OpenWrt staging_dir
+        uses: actions/cache@v4
+        with:
+          path: openwrt/staging_dir
+          key: openwrt-staging-${{ env.REPO_BRANCH }}
+          restore-keys: |
+            openwrt-staging-
+      - name: Load custom feeds script
+        run: |
+          [ -e "$FEEDS_CONF" ] && mv "$FEEDS_CONF" openwrt/feeds.conf.default
+          chmod +x "$DIY_P1_SH"
           cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P1_SH
+          "$GITHUB_WORKSPACE/$DIY_P1_SH"
       - name: Force GitHub feeds mirrors
         run: |
           cat > openwrt/feeds.conf.default <<'EOF'
@@ -100,162 +87,62 @@ jobs:
           src-git routing https://github.com/openwrt/routing.git
           src-git telephony https://github.com/openwrt/telephony.git
           EOF
-          echo "feeds.conf.default rewritten to use GitHub mirrors"
+
           cat openwrt/feeds.conf.default
-      - name: Update feeds (with retry & fallback)
+      - name: Update feeds (retry)
         run: |
           cd openwrt
           for i in 1 2 3; do
-            echo "Feeds update attempt $i..."
             ./scripts/feeds update -a && break
             sleep 10
           done
-          if [ $? -ne 0 ]; then
-            echo "Feeds update failed after retries"
-            exit 1
-          fi
       - name: Install feeds
-        run: cd openwrt && ./scripts/feeds install -a
+        run: |
+          cd openwrt
+          ./scripts/feeds install -a
       - name: Load custom configuration
         run: |
-          if [ -e "files" ]; then
-            echo "Moving custom files"
-            mv files openwrt/files
-          else
-            echo "No custom files to move"
-          fi
-          if [ -e "$CONFIG_FILE" ]; then
-            echo "Moving custom config file"
-            mv "$CONFIG_FILE" openwrt/.config
-          else
-            echo "Custom config file not found, using default"
-          fi
+          [ -d files ] && mv files openwrt/files
+          [ -f "$CONFIG_FILE" ] && mv "$CONFIG_FILE" openwrt/.config
+
           if [ -f "$DIY_P2_SH" ]; then
             chmod +x "$DIY_P2_SH"
             cd openwrt
-            $GITHUB_WORKSPACE/$DIY_P2_SH
-          else
-            echo "Custom script $DIY_P2_SH not found, skipping"
+            "$GITHUB_WORKSPACE/$DIY_P2_SH"
           fi
-      - name: Download package
-        id: package
+      - name: Download packages
         run: |
           cd openwrt
           make defconfig
-          make download -j$(nproc)
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
-      - name: Compile the firmware
+          make download -j$(nproc) || make download -j1 V=s
+          find dl -size -1024c -delete
+      - name: Compile firmware
         id: compile
-        run: >
+        run: |
           cd openwrt
-          echo "Compiling with $(nproc) threads"
           make -j$(nproc) || make -j1 V=s
+
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config \
+            | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          echo "FILE_DATE=_$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
-          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r
-          's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >>
-          $GITHUB_ENV
-          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-      - name: Check space usage
-        if: (!cancelled())
-        run: df -hT
-      - name: Upload bin directory
-        uses: actions/upload-artifact@v4
-        if: env.UPLOAD_BIN_DIR == 'true' && !cancelled()
-        with:
-          name: 'OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}'
-          path: openwrt/bin
-      - name: Organize files
-        id: organize
-        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      - name: Organize firmware files
+        if: env.UPLOAD_FIRMWARE == 'true'
         run: |
           cd openwrt/bin/targets/*/*
           rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-          echo "status=success" >> $GITHUB_OUTPUT
-      - name: Upload firmware directory
+      - name: Upload firmware
+        if: env.UPLOAD_FIRMWARE == 'true'
         uses: actions/upload-artifact@v4
-        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
         with:
-          name: 'OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}'
-          path: '${{ env.FIRMWARE }}'
-      - name: Get latest OpenWrt changes
-        id: openwrt_changes
-        run: >
-          echo "Fetching latest OpenWrt changes from GitHub API..."
-          changes=$(curl -s
-          'https://api.github.com/repos/openwrt/openwrt/commits?sha=${{
-          env.REPO_BRANCH }}' | 
-                    jq -r '.[:10] | map("- " + (.commit.author.date | .[0:10]) + ": " + (.commit.message | split("\n")[0])) | .[]')
-          echo "Debug: Latest OpenWrt changes:"
-          echo "$changes"
-          if [ -z "$changes" ]; then
-            echo "Warning: No changes fetched. Using placeholder message."
-            changes="Unable to fetch recent changes. Please check the OpenWrt repository for updates."
-          fi
-          echo "formatted_changes<<EOF" >> $GITHUB_OUTPUT
-          echo "$changes" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-      - name: Generate release tag
-        id: tag
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-        run: >
-          echo "release_tag=${{ steps.openwrt_version.outputs.repo_branch
-          }}-$(date +"%Y.%m.%d")${{ env.FILE_DATE }}" >> $GITHUB_OUTPUT
-          echo "status=success" >> $GITHUB_OUTPUT
-      - name: Upload firmware to release
-        uses: softprops/action-gh-release@v2
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-        env:
-          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
-        with:
-          tag_name: '${{ steps.tag.outputs.release_tag }}'
-          files: '${{ env.FIRMWARE }}/*'
-          body: >
-            This is an automated build of OpenWrt firmware for supported
-            devices.
-            Built on: ${{ steps.tag.outputs.release_tag }}
-            Device: ${{ env.DEVICE_NAME || 'Unknown' }}
-            ${{ env.FIRMWARE != '' && 'Firmware can be found in the assets
-            below.' || 'No firmware files were generated.' }}
-            Recent OpenWrt changes:
-            ${{ steps.openwrt_changes.outputs.formatted_changes || 'No recent
-            changes information available.' }}
+          name: OpenWrt${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: ${{ env.FIRMWARE }}
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
-          token: '${{ secrets.GITHUB_TOKEN }}'
-          repository: '${{ github.repository }}'
+          token: ${{ secrets.GITHUB_TOKEN }}
           retain_days: 1
           keep_minimum_runs: 1
-          delete_workflow_pattern: build-openwrt.yml
-          delete_run_by_conclusion_pattern: 'success,failure,cancelled'
-      - name: Remove old Releases
-        uses: dev-drprasad/delete-older-releases@v0.3.3
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-        with:
-          keep_latest: '${{ env.KEEP_LATEST_RELEASES }}'
-          delete_tags: true
-          delete_prerelease_only: '${{ env.DELETE_ONLY_PRE_RELEASES }}'
-        env:
-          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
-      - name: Check compilation result
-        if: steps.compile.outputs.status == 'success'
-        run: |
-          cd openwrt/bin/targets/*/*
-          echo "=== Firmware files ==="
-          ls -lh
-          echo "======================"
-          echo "DEVICE_NAME: ${{ env.DEVICE_NAME }}"
-          echo "FILE_DATE: ${{ env.FILE_DATE }}"
-      - name: Check environment
-        run: |
-          echo "Checking required tools..."
-          for tool in git make gcc g++ unzip wget curl; do
-            if ! command -v $tool &> /dev/null; then
-              echo "$tool is not installed. Please add it to the workflow."
-              exit 1
-            fi
-          done
-          echo "All required tools are available."
