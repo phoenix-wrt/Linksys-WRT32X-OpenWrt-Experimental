@@ -1,22 +1,3 @@
-# File: .github/workflows/build-openwrt.yml
----
-# Inspired by P3TERX <https://p3terx.com>
-#
-# This file is part of Project Name and is released under the MIT License.
-# See the LICENSE file for more details.
-#
-# Description: This workflow automates the build process for OpenWrt firmware.
-#
-# Key features:
-# - Automated build process for OpenWrt firmware
-# - Dynamic detection of the latest stable OpenWrt version
-# - Customizable configuration and script support
-# - Efficient use of GitHub Actions resources
-# - Automatic cleanup of old workflow runs and releases
-# - Comprehensive error handling and logging
-# - Integration with GitHub releases for easy firmware distribution
-# - Inclusion of recent OpenWrt changes in release notes
-
 name: Build OpenWrt
 'on':
   repository_dispatch: null
