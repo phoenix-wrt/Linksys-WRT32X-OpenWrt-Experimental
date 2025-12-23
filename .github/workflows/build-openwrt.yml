@@ -58,7 +58,7 @@ jobs:
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
       - name: Clean up disk space
-        run: >
+        run: |
           sudo apt-get autoremove -y && sudo apt-get clean
 
           sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -112,7 +112,7 @@ jobs:
           find dl -size -1024c -exec rm -f {} \;
       - name: Compile the firmware
         id: compile
-        run: >
+        run: |
           cd openwrt
 
           echo "Compiling with $(nproc) threads"
@@ -153,7 +153,7 @@ jobs:
           path: '${{ env.FIRMWARE }}'
       - name: Get latest OpenWrt changes
         id: openwrt_changes
-        run: >
+        run: |
           echo "Fetching latest OpenWrt changes from GitHub API..."
 
           changes=$(curl -s
@@ -180,7 +180,7 @@ jobs:
       - name: Generate release tag
         id: tag
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-        run: >
+        run: |
           echo "release_tag=${{ steps.openwrt_version.outputs.repo_branch
           }}-$(date +"%Y.%m.%d")${{ env.FILE_DATE }}" >> $GITHUB_OUTPUT
 
