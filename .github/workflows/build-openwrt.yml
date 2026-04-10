@@ -4,7 +4,7 @@ name: Build OpenWrt
     inputs:
       openwrt_version:
         description: Specify OpenWrt version (e.g. 23.05.0 or 24.10.0-rc4)
-        default: 25.12.2
+        default: 24.10.6
         required: false
 concurrency:
   group: '${{ github.workflow }}-${{ github.ref }}'
@@ -18,7 +18,7 @@ env:
   DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
+  UPLOAD_RELEASE: false
   TZ: Europe/Kiev
   KEEP_LATEST_RELEASES: 3
   DELETE_ONLY_PRE_RELEASES: false
