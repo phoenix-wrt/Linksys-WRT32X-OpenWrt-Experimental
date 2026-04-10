@@ -20,7 +20,10 @@ env:
   DELETE_ONLY_PRE_RELEASES: false
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04 # [NEW] Изменено с 24.04 на 22.04 для лучшей совместимости тулчейна
+    permissions:          # [NEW] Добавлены права для успешной работы шагов очистки
+      contents: write
+      actions: write
     steps:
       - name: Checkout workflow repository
         uses: actions/checkout@v4
@@ -99,6 +102,13 @@ jobs:
             cd openwrt
             "$GITHUB_WORKSPACE/$DIY_P2_SH"
           fi
+      - name: Cache dl directory # [NEW] Шаг кэширования пакетов для ускорения будущих сборок
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('**/feeds.conf.default', '**/.config') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-dl-
       - name: Download packages
         run: |
           cd openwrt
@@ -111,7 +121,8 @@ jobs:
           cd openwrt
           make -j$(nproc) || make -j1 V=s
 
-          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | \
+          # [NEW] Добавлен head -n 1 для защиты от множественных совпадений имени устройства
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | head -n 1 | \
             sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME || true
 
           if [ -s DEVICE_NAME ]; then
