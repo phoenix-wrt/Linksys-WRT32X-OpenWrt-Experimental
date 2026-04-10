@@ -4,7 +4,7 @@ name: Build OpenWrt
     inputs:
       openwrt_version:
         description: Specify OpenWrt version (e.g. 23.05.0 or 24.10.0-rc4)
-        default: 24.10.5
+        default: 25.12.2
         required: false
 env:
   REPO_URL: 'https://github.com/openwrt/openwrt.git'
